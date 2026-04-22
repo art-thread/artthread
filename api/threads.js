@@ -32,7 +32,7 @@ export default async function handler(req, res) {
     });
 
     const data = await response.json();
-    const text = data.content.map(b => b.text || "").join("");
+    const text = (data.content || []).map(b => b.text || "").join("");
     return res.status(200).json(JSON.parse(text.replace(/```json|```/g, "").trim()));
   } catch (err) {
     return res.status(500).json({ error: err.message });

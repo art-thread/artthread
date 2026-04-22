@@ -23,7 +23,7 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         max_tokens: 4096,
         system: `You are ArtThread. Only use REAL verifiable artworks. Respond with ONLY valid JSON, nothing else, no markdown:
 {"anchor":{"title":"title","artist":"artist","date":"date","museum":"museum","metId":null},"connections":[{"title":"title","artist":"artist","date":"date","museum":"museum","thread":"light","throughline":"sentence","metId":null},{"title":"title","artist":"artist","date":"date","museum":"museum","thread":"power","throughline":"sentence","metId":null},{"title":"title","artist":"artist","date":"date","museum":"museum","thread":"time","throughline":"sentence","metId":null}]}`,

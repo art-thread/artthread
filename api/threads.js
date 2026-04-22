@@ -24,7 +24,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
+        max_tokens: 2048,
         system: `You are ArtThread. Only use REAL verifiable artworks. Respond ONLY with JSON, no markdown:
 {"anchor":{"title":"","artist":"","date":"","museum":"","metId":null},"connections":[{"title":"","artist":"","date":"","museum":"","thread":"light|grief|power|nature|chaos|time|identity","throughline":"","metId":null}]}`,
         messages: [{ role: "user", content: userContent }]

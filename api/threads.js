@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   if (imageBase64) {
     userContent.push({ type: "image", source: { type: "base64", media_type: imageType || "image/jpeg", data: imageBase64 }});
   }
-  userContent.push({ type: "text", text: imageBase64 ? `Identify this museum artwork then find 3 real connected works. ${query || ""}` : `About "${query}": identify it in a major museum then find 3 real connected works.` });
+  userContent.push({ type: "text", text: imageBase64 ? `Identify this artwork then find 3 connected works. ${query || ""}` : `Find connections for: "${query}"` });
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -24,16 +24,24 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 2048,
-        system: `You are ArtThread. Only use REAL verifiable artworks. Respond ONLY with JSON, no markdown:
-{"anchor":{"title":"","artist":"","date":"","museum":"","metId":null},"connections":[{"title":"","artist":"","date":"","museum":"","thread":"light|grief|power|nature|chaos|time|identity","throughline":"","metId":null}]}`,
+        max_tokens: 4096,
+        system: `You are ArtThread. Only use REAL verifiable artworks. Respond with ONLY valid JSON, nothing else, no markdown:
+{"anchor":{"title":"title","artist":"artist","date":"date","museum":"museum","metId":null},"connections":[{"title":"title","artist":"artist","date":"date","museum":"museum","thread":"light","throughline":"sentence","metId":null},{"title":"title","artist":"artist","date":"date","museum":"museum","thread":"power","throughline":"sentence","metId":null},{"title":"title","artist":"artist","date":"date","museum":"museum","thread":"time","throughline":"sentence","metId":null}]}`,
         messages: [{ role: "user", content: userContent }]
       })
     });
 
     const data = await response.json();
-    const text = (data.content || []).map(b => b.text || "").join("");
-    return res.status(200).json(JSON.parse(text.replace(/```json|```/g, "").trim()));
+    
+    if (!data.content || !data.content[0]) {
+      return res.status(500).json({ error: "No response from API: " + JSON.stringify(data) });
+    }
+
+    const text = data.content[0].text;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return res.status(500).json({ error: "No JSON found in: " + text.substring(0, 200) });
+    
+    return res.status(200).json(JSON.parse(jsonMatch[0]));
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

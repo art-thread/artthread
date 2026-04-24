@@ -109,19 +109,42 @@
 </div>
 <script>
 let imageBase64 = null, imageType = null;
-function handleUpload(e) {
+async function handleImageLoad(e) {
   const file = e.target.files[0];
   if (!file) return;
+  
+  const compressed = await compressImage(file);
   const reader = new FileReader();
   reader.onload = (ev) => {
     const dataUrl = ev.target.result;
     imageBase64 = dataUrl.split(',')[1];
-    imageType = file.type;
+    imageType = compressed.type;
     const zone = document.getElementById('upload-zone');
     zone.classList.add('has-image');
-    zone.innerHTML = `<img class="preview-img" src="${dataUrl}"><div class="remove-btn" onclick="removeImage(event)">✕</div>`;
+    zone.innerHTML = `<img class="preview-img" src="${dataUrl}"><div class="remove-btn" onclick="removeImage(event)">X</div>`;
   };
-  reader.readAsDataURL(file);
+  reader.readAsDataURL(compressed);
+}
+
+function compressImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const maxSize = 1200;
+      let w = img.width, h = img.height;
+      if (w > maxSize || h > maxSize) {
+        if (w > h) { h = h * maxSize / w; w = maxSize; }
+        else { w = w * maxSize / h; h = maxSize; }
+      }
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      canvas.toBlob(resolve, 'image/jpeg', 0.8);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
 }
 function removeImage(e) {
   e.stopPropagation();

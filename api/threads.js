@@ -1,3 +1,22 @@
+async function fetchMetData(title, artist) {
+  try {
+    const q = encodeURIComponent(`${title} ${artist}`);
+    const searchRes = await fetch(
+      `https://collectionapi.metmuseum.org/public/collection/v1/search?q=${q}&hasImages=true`
+    );
+    const searchData = await searchRes.json();
+    if (!searchData.objectIDs || searchData.objectIDs.length === 0) return null;
+
+    const objRes = await fetch(
+      `https://collectionapi.metmuseum.org/public/collection/v1/objects/${searchData.objectIDs[0]}`
+    );
+    const obj = await objRes.json();
+    return { metId: obj.objectID, primaryImage: obj.primaryImage || obj.primaryImageSmall || null };
+  } catch {
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -32,7 +51,7 @@ export default async function handler(req, res) {
     });
 
     const data = await response.json();
-    
+
     if (!data.content || !data.content[0]) {
       return res.status(500).json({ error: "No response from API: " + JSON.stringify(data) });
     }
@@ -40,8 +59,16 @@ export default async function handler(req, res) {
     const text = data.content[0].text;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return res.status(500).json({ error: "No JSON found in: " + text.substring(0, 200) });
-    
-    return res.status(200).json(JSON.parse(jsonMatch[0]));
+
+    const result = JSON.parse(jsonMatch[0]);
+
+    const metData = await fetchMetData(result.anchor.title, result.anchor.artist);
+    if (metData) {
+      result.anchor.metId = metData.metId;
+      result.anchor.primaryImage = metData.primaryImage;
+    }
+
+    return res.status(200).json(result);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

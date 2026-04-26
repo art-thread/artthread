@@ -1,4 +1,4 @@
-// v4 - Kiefer, contemporary collection, confidence rules, Leopold Museum
+ü// v4 - Kiefer, contemporary collection, confidence rules, Leopold Museum
 // Fetch image from Wikimedia Commons for a given artwork title/artist
 async function fetchWikimediaImage(title, artist) {
       try {

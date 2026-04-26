@@ -18,7 +18,7 @@ async function fetchMetData(title, artist) {
 }
 
 const ALBERTINA_COLLECTION = `
-ALBERTINA MUSEUM, Vienna — Key permanent collection works:
+ALBERTINA MUSEUM, Vienna — Key permanent collection works:h
 - Young Hare (1502) by Albrecht Dürer. Watercolour. Albertina Graphic Art Collection. Shown in rotation.
 - Praying Hands / Betende Hände (c.1508) by Albrecht Dürer. Pen and ink. Albertina Graphic Art Collection. Shown in rotation.
 - The Water Lily Pond (1917-19) by Claude Monet. Oil on canvas. Batliner Collection. On permanent display.
@@ -44,6 +44,9 @@ ALBERTINA MUSEUM, Vienna — Key permanent collection works:
 - The Painter and the Buyer (c.1565) by Pieter Bruegel the Elder. Pen and ink. Graphic Art Collection. Shown in rotation.
 - Los Caprichos series (c.1794-98) by Francisco Goya. Aquatint/etching. Graphic Art Collection. Selections shown periodically.
 - Nicolas Rubens with Coral Necklace (c.1619) by Peter Paul Rubens. Chalk. Graphic Art Collection. Shown in rotation.
+- The Enchanted Spot (1953) by Rene Magritte. Oil on canvas. Albertina Collection. On permanent display.
+- The Son of Man (1964) by Rene Magritte. Oil on canvas. Private collection / widely exhibited. Note: verify location before citing.
+- Henri Lebasque works. Oil on canvas. Albertina Collection. On permanent display.
 NOTE: If an image appears to show a work from the above list, identify it correctly and set museum to "Albertina Museum, Vienna".
 `;
 

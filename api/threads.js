@@ -24,7 +24,7 @@ async function fetchMetData(title, artist) {
           if (!image) return null;
           return { metId: obj.objectID, primaryImage: image, museum: obj.repository || 'Metropolitan Museum of Art, New York' };
     } catch(e) { return null; }
-}
+}h
 
 async function fetchAICData(title, artist) {
     try {
@@ -149,7 +149,7 @@ async function fetchArtworkImage(title, artist) {
   - Ignore glass reflections glare and people in foreground.
   `;
 
-  export default async function handler(req, res) {
+  module.exports = async function handler(req, res) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');

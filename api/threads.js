@@ -24,7 +24,7 @@ async function fetchMetData(title, artist) {
           if (!image) return null;
           return { metId: obj.objectID, primaryImage: image, museum: obj.repository || 'Metropolitan Museum of Art, New York' };
     } catch(e) { return null; }
-}h
+}
 
 async function fetchAICData(title, artist) {
     try {

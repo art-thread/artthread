@@ -193,11 +193,16 @@ if (!jsonMatch) return res.status(500).json({ error: 'No JSON found: ' + text.su
 
 const result = JSON.parse(jsonMatch[0]);
 
+// Anchor image: only try Met if it's actually a Met work
+const isMetWork = result.anchor.museum && result.anchor.museum.toLowerCase().includes('metropolitan');
+if (isMetWork) {
 const anchorMet = await fetchMetData(result.anchor.title, result.anchor.artist);
 if (anchorMet) {
 result.anchor.metId = anchorMet.metId;
 result.anchor.primaryImage = anchorMet.primaryImage;
-} else {
+}
+}
+if (!result.anchor.primaryImage) {
 const anchorImg = await fetchArtworkImage(result.anchor.title, result.anchor.artist);
 if (anchorImg && anchorImg.primaryImage) result.anchor.primaryImage = anchorImg.primaryImage;
 }

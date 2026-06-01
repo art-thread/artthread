@@ -68,11 +68,12 @@ if (!title || title === 'Unknown work') return null;
 // Try Wikimedia first — most reliable for non-Met works
 const wiki = await fetchWikimediaImage(title, artist);
 if (wiki) return { primaryImage: wiki, museum: null };
-// Then try other museum APIs (not Met — too many false positives)
+// Then try all museum APIs as fallback (Met last — prone to false positives but useful as last resort)
 const results = await Promise.allSettled([
 fetchAICData(title, artist),
 fetchRijksData(title, artist),
-fetchVAData(title, artist)
+fetchVAData(title, artist),
+fetchMetData(title, artist)
 ]);
 for (const r of results) {
 if (r.status === 'fulfilled' && r.value && r.value.primaryImage) return r.value;

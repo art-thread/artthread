@@ -180,13 +180,21 @@ function pillClass(t) {
 }
 function renderResults(result) {
   const a = result.anchor, conns = result.connections || [];
-  const thumb = a.metId ? `<img class="anchor-thumb" src="https://collectionapi.metmuseum.org/api/collection/v1/iiif/${a.metId}/main-image" onerror="this.style.display='none'" alt="">` : `<div class="anchor-thumb"></div>`;
+  const thumbSrc = a.primaryImage || (a.metId ? `https://collectionapi.metmuseum.org/api/collection/v1/iiif/${a.metId}/main-image` : null);
+const thumb = thumbSrc ? `<img class="anchor-thumb" src="${thumbSrc}" onerror="this.style.display='none'" alt="">` : `<div class="anchor-thumb"></div>`;
   let html = `<div class="results"><div class="results-header">Threads from <em>${a.title}</em></div><div class="anchor-card">${thumb}<div><div class="anchor-label">Your artwork</div><div class="anchor-title">${a.title}</div><div class="anchor-meta">${a.artist} · ${a.date} · ${a.museum}</div></div></div><div class="thread-label">Connected across time</div>`;
   conns.forEach((c, i) => {
     const ct = c.metId ? `<img class="conn-thumb" src="https://collectionapi.metmuseum.org/api/collection/v1/iiif/${c.metId}/main-image" onerror="this.style.background='#f5f4f0'" alt="">` : `<div class="conn-thumb"></div>`;
-    html += `<div class="conn-card" style="animation-delay:${i*0.1}s">${ct}<div><div class="pill ${pillClass(c.thread)}">${c.thread}</div><div class="conn-title">${c.title}</div><div class="conn-meta">${c.artist} · ${c.date} · ${c.museum}</div><div class="throughline">"${c.throughline}"</div></div></div>`;
+    html += `<div class="conn-card" style="animation-delay:${i*0.1}s;cursor:pointer;" onclick="jumpTo(this)"data-title="${c.title.replace(/"/g,'&quot;')}"data-artist="${c.artist.replace(/"/g,'&quot;')}">${ct}<div><div class="pill ${pillClass(c.thread)}">${c.thread}</div><div class="conn-title">${c.title}</div><div class="conn-meta">${c.artist} · ${c.date} · ${c.museum}</div><div class="throughline">"${c.throughline}"</div></div></div>`;
   });
   document.getElementById('output').innerHTML = html + '</div>';
+}
+function jumpTo(el) {
+  const title = el.getAttribute('data-title');
+  const artist = el.getAttribute('data-artist');
+  document.getElementById('art-input').value = title + (artist ? ', ' + artist : '');
+  window.scrollTo({top: 0, behavior: 'smooth'});
+  setTimeout(findThreads, 300);
 }
 document.getElementById('art-input').addEventListener('keydown', e => { if (e.key === 'Enter') findThreads(); });
 </script>

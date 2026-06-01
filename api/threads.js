@@ -65,95 +65,24 @@ return { primaryImage: 'https://framemark.vam.ac.uk/collections/' + imageId + '/
 
 async function fetchArtworkImage(title, artist) {
 if (!title || title === 'Unknown work') return null;
-// Try Wikimedia first — most reliable for non-Met works
-const wiki = await fetchWikimediaImage(title, artist);
-if (wiki) return { primaryImage: wiki, museum: null };
-// Then try all museum APIs as fallback (Met last — prone to false positives but useful as last resort)
-const results = await Promise.allSettled([
+// Run all sources in parallel — Wikimedia + museum APIs
+const [wiki, ...museumResults] = await Promise.allSettled([
+fetchWikimediaImage(title, artist),
 fetchAICData(title, artist),
 fetchRijksData(title, artist),
 fetchVAData(title, artist),
 fetchMetData(title, artist)
 ]);
-for (const r of results) {
+// Wikimedia first if it found something
+if (wiki.status === 'fulfilled' && wiki.value) return { primaryImage: wiki.value, museum: null };
+// Then museum APIs in order (Met last)
+for (const r of museumResults) {
 if (r.status === 'fulfilled' && r.value && r.value.primaryImage) return r.value;
 }
 return null;
 }
 
-const ALBERTINA = `
-ALBERTINA MUSEUM Vienna - verified from sammlungenonline.albertina.at
-
-ALBRECHT DURER (shown in rotation):
-- Feldhase / Young Hare (1502) watercolour
-- Das grosse Rasenstuck / Large Piece of Turf (1503) watercolour
-- Betende Hande / Praying Hands (c.1508) pen and ink
-- Veilchenstrauss / Bunch of Violets (c.1495-1500) watercolour
-
-EGON SCHIELE (209 works - drawings):
-- Self-Portrait with Physalis, Nude Self-Portrait, Embrace, Edith Schiele
-
-GUSTAV KLIMT:
-- Nixen / Nymphs / Silver Fish (c.1899) painting - PERMANENT DISPLAY
-- Studies for The Kiss (1907-08) drawings
-
-REMBRANDT VAN RIJN:
-- Ein Elefant / An Elephant (1637) black chalk - shown in rotation
-
-ANSELM KIEFER (13 works - verified):
-- Der Rhein / The Rhine (1993) monumental woodcut - large scale, dark vertical forms, black and white, wood grain texture
-- Wege der Weltweisheit: die Hermannsschlacht (1993) woodcut
-- Merkaba (2006) mixed media - PERMANENT DISPLAY
-- Fur Paul Celan (2004/2005) prints
-
-BATLINER COLLECTION (permanent display):
-- Water Lily Pond (1917-19) Claude Monet
-- View of Vetheuil (1881) Claude Monet
-- Two Dancers (c.1905) Edgar Degas
-- Farm in Normandy (c.1885-86) Paul Cezanne
-- Young Woman in a Shirt (1918) Amedeo Modigliani
-- Mediterranean Landscape (1952) Pablo Picasso
-- Woman with Cat (1942) Pablo Picasso
-- Woman in a Green Hat (1947) Pablo Picasso
-- Man in a Suprematist Landscape (c.1930-31) Kazimir Malevich
-- Winter Landscape (1915) Edvard Munch
-- On the Green Bank Sanary (1911) Henri Matisse
-- Moonlit Night (1914) Emil Nolde
-- Inner Alliance (1929) Wassily Kandinsky
-- Girl in a Flowered Hat (1910) Ernst Ludwig Kirchner
-- London Small Thames Landscape (1926) Oskar Kokoschka
-- Rotes Land (1960/63) Arnulf Rainer
-- Potato Press (1989) Maria Lassnig
-- Black Hat 2 (2010) Alex Katz
-
-ALBERTINA OWN COLLECTION:
-- The Enchanted Spot (1953) Rene Magritte - PERMANENT
-- Mercedes-Benz W125 (1987) Andy Warhol
-- Mao Tse-Tung (1972) Andy Warhol
-- Abstract Painting (2001) Gerhard Richter
-- Nicolas Rubens with Coral Necklace (c.1619) Peter Paul Rubens - chalk
-- The Painter and the Buyer (c.1565) Pieter Bruegel the Elder - pen and ink
-- Los Caprichos series (c.1794-98) Francisco Goya
-
-TEMPORARY EXHIBITION (April-August 2026):
-- Richard Prince retrospective: Cowboys, Fashion, Gangs
-
-LEOPOLD MUSEUM Vienna:
-- Death and Life (1910-15) Gustav Klimt
-- Hope II (1907-08) Gustav Klimt
-- Self-Portrait with Physalis (1912) Egon Schiele
-- The Family (1918) Egon Schiele
-- Portrait of Wally (1912) Egon Schiele
-- Agony (1912) Egon Schiele
-- The Dancer (1916-18) Richard Gerstl
-- Self-Portrait Laughing (1908) Richard Gerstl
-
-RULES:
-- Match works to this list. Set museum field accordingly.
-- Kiefer monumental black-and-white woodcuts with vertical dark forms = Der Rhein or Wege der Weltweisheit at Albertina.
-- If you cannot confidently identify a work set title to Unknown work and artist to Unknown artist. Never guess.
-- Ignore glass reflections glare and people in foreground.
-`;
+const ALBERTINA = ''
 
 module.exports = async function handler(req, res) {
 res.setHeader('Access-Control-Allow-Origin', '*');

@@ -1,4 +1,4 @@
-// v13 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia + Cleveland + Smithsonian + NGA + Europeana
+// v14 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia + Cleveland + Smithsonian + NGA + Europeana + Mia
 
 async function fetchWikimediaImage(title, artist) {
 try {
@@ -122,6 +122,21 @@ return { primaryImage: imageUrl, museum: museum };
 } catch(e) { return null; }
 }
 
+async function fetchMiaData(title, artist) {
+try {
+const q = encodeURIComponent(title + ' ' + artist);
+const res = await fetch('https://search.artsmia.org/?' + q + '&size=1');
+const data = await res.json();
+const hit = data && data.hits && data.hits.hits && data.hits.hits[0];
+if (!hit) return null;
+const src = hit._source;
+if (!src || !src.image) return null;
+const id = src.id;
+const imageUrl = 'https://cdn.dx.artsmia.org/thumbs/iiif/' + id + '/full/400,/0/default.jpg';
+return { primaryImage: imageUrl, museum: 'Minneapolis Institute of Art' };
+} catch(e) { return null; }
+}
+
 async function fetchArtworkImage(title, artist) {
 if (!title || title === 'Unknown work') return null;
 const [wiki, ...museumResults] = await Promise.allSettled([
@@ -133,6 +148,7 @@ fetchClevelandData(title, artist),
 fetchSmithsonianData(title, artist),
 fetchNGAData(title, artist),
 fetchEuropeanaData(title, artist),
+fetchMiaData(title, artist),
 fetchMetData(title, artist)
 ]);
 if (wiki.status === 'fulfilled' && wiki.value) return { primaryImage: wiki.value, museum: null };

@@ -1,4 +1,4 @@
-// v6 - Multi-museum: Met + Art Institute Chicago + Rijksmuseum + V&A + Wikimedia
+// v8 - Multi-museum: Met + Art Institute Chicago + Rijksmuseum + V&A + Wikimedia + Cleveland Museum of Art
 
 async function fetchWikimediaImage(title, artist) {
 try {
@@ -63,19 +63,30 @@ return { primaryImage: 'https://framemark.vam.ac.uk/collections/' + imageId + '/
 } catch(e) { return null; }
 }
 
+async function fetchClevelandData(title, artist) {
+try {
+const q = encodeURIComponent(title + ' ' + artist);
+const res = await fetch('https://openaccess-api.clevelandart.org/api/artworks/?q=' + q + '&has_image=1&limit=1');
+const data = await res.json();
+const work = data && data.data && data.data[0];
+if (!work) return null;
+const image = work.images && (work.images.web || work.images.print);
+if (!image || !image.url) return null;
+return { primaryImage: image.url, museum: 'Cleveland Museum of Art' };
+} catch(e) { return null; }
+}
+
 async function fetchArtworkImage(title, artist) {
 if (!title || title === 'Unknown work') return null;
-// Run all sources in parallel — Wikimedia + museum APIs
 const [wiki, ...museumResults] = await Promise.allSettled([
 fetchWikimediaImage(title, artist),
 fetchAICData(title, artist),
 fetchRijksData(title, artist),
 fetchVAData(title, artist),
+fetchClevelandData(title, artist),
 fetchMetData(title, artist)
 ]);
-// Wikimedia first if it found something
 if (wiki.status === 'fulfilled' && wiki.value) return { primaryImage: wiki.value, museum: null };
-// Then museum APIs in order (Met last)
 for (const r of museumResults) {
 if (r.status === 'fulfilled' && r.value && r.value.primaryImage) return r.value;
 }
@@ -125,7 +136,6 @@ if (!jsonMatch) return res.status(500).json({ error: 'No JSON found: ' + text.su
 
 const result = JSON.parse(jsonMatch[0]);
 
-// Anchor image: only try Met if it's actually a Met work
 const isMetWork = result.anchor.museum && result.anchor.museum.toLowerCase().includes('metropolitan');
 if (isMetWork) {
 const anchorMet = await fetchMetData(result.anchor.title, result.anchor.artist);

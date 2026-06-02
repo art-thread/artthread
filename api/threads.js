@@ -1,4 +1,4 @@
-// v11 - revert Wikimedia to Wikipedia (was working for anchor thumbnails)
+// v12 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia + Cleveland + Smithsonian + NGA Washington
 
 async function fetchWikimediaImage(title, artist) {
 try {
@@ -94,6 +94,19 @@ return { primaryImage: imageUrl, museum: museumName };
 } catch(e) { return null; }
 }
 
+async function fetchNGAData(title, artist) {
+try {
+const q = encodeURIComponent(title + ' ' + artist);
+const res = await fetch('https://api.nga.gov/art/tms/objects?title=' + encodeURIComponent(title) + '&artist=' + encodeURIComponent(artist) + '&hasimage=1&limit=1&offset=0');
+const data = await res.json();
+const work = data && data.data && data.data[0];
+if (!work) return null;
+const imageUrl = work.primaryimage ? 'https://api.nga.gov/iiif/' + work.primaryimage + '/full/!400,400/0/default.jpg' : null;
+if (!imageUrl) return null;
+return { primaryImage: imageUrl, museum: 'National Gallery of Art, Washington DC' };
+} catch(e) { return null; }
+}
+
 async function fetchArtworkImage(title, artist) {
 if (!title || title === 'Unknown work') return null;
 const [wiki, ...museumResults] = await Promise.allSettled([
@@ -103,6 +116,7 @@ fetchRijksData(title, artist),
 fetchVAData(title, artist),
 fetchClevelandData(title, artist),
 fetchSmithsonianData(title, artist),
+fetchNGAData(title, artist),
 fetchMetData(title, artist)
 ]);
 if (wiki.status === 'fulfilled' && wiki.value) return { primaryImage: wiki.value, museum: null };

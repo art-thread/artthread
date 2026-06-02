@@ -1,4 +1,4 @@
-// v12 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia + Cleveland + Smithsonian + NGA Washington
+// v13 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia + Cleveland + Smithsonian + NGA + Europeana
 
 async function fetchWikimediaImage(title, artist) {
 try {
@@ -96,7 +96,6 @@ return { primaryImage: imageUrl, museum: museumName };
 
 async function fetchNGAData(title, artist) {
 try {
-const q = encodeURIComponent(title + ' ' + artist);
 const res = await fetch('https://api.nga.gov/art/tms/objects?title=' + encodeURIComponent(title) + '&artist=' + encodeURIComponent(artist) + '&hasimage=1&limit=1&offset=0');
 const data = await res.json();
 const work = data && data.data && data.data[0];
@@ -104,6 +103,22 @@ if (!work) return null;
 const imageUrl = work.primaryimage ? 'https://api.nga.gov/iiif/' + work.primaryimage + '/full/!400,400/0/default.jpg' : null;
 if (!imageUrl) return null;
 return { primaryImage: imageUrl, museum: 'National Gallery of Art, Washington DC' };
+} catch(e) { return null; }
+}
+
+async function fetchEuropeanaData(title, artist) {
+try {
+const key = process.env.EUROPEANA_API_KEY;
+if (!key) return null;
+const q = encodeURIComponent('"' + title + '" "' + artist + '"');
+const res = await fetch('https://api.europeana.eu/record/v2/search.json?wskey=' + key + '&query=' + q + '&qf=TYPE%3AIMAGE&rows=1&profile=rich');
+const data = await res.json();
+const item = data && data.items && data.items[0];
+if (!item) return null;
+const imageUrl = item.edmPreview && item.edmPreview[0];
+if (!imageUrl) return null;
+const museum = item.dataProvider && item.dataProvider[0] || 'Europeana';
+return { primaryImage: imageUrl, museum: museum };
 } catch(e) { return null; }
 }
 
@@ -117,6 +132,7 @@ fetchVAData(title, artist),
 fetchClevelandData(title, artist),
 fetchSmithsonianData(title, artist),
 fetchNGAData(title, artist),
+fetchEuropeanaData(title, artist),
 fetchMetData(title, artist)
 ]);
 if (wiki.status === 'fulfilled' && wiki.value) return { primaryImage: wiki.value, museum: null };

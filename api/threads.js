@@ -1,4 +1,4 @@
-// v15 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia + Cleveland + Smithsonian + NGA + Europeana + Mia + Getty + Tate
+// v16 - Move Wikipedia to last resort, museum APIs first for better thumbnail accuracy
 
 async function fetchWikimediaImage(title, artist) {
 try {
@@ -167,8 +167,7 @@ return { primaryImage: imageUrl, museum: 'Tate, London' };
 
 async function fetchArtworkImage(title, artist) {
 if (!title || title === 'Unknown work') return null;
-const [wiki, ...museumResults] = await Promise.allSettled([
-fetchWikimediaImage(title, artist),
+const results = await Promise.allSettled([
 fetchAICData(title, artist),
 fetchRijksData(title, artist),
 fetchVAData(title, artist),
@@ -181,10 +180,11 @@ fetchGettyData(title, artist),
 fetchTateData(title, artist),
 fetchMetData(title, artist)
 ]);
-if (wiki.status === 'fulfilled' && wiki.value) return { primaryImage: wiki.value, museum: null };
-for (const r of museumResults) {
+for (const r of results) {
 if (r.status === 'fulfilled' && r.value && r.value.primaryImage) return r.value;
 }
+const wiki = await fetchWikimediaImage(title, artist);
+if (wiki) return { primaryImage: wiki, museum: null };
 return null;
 }
 

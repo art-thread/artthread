@@ -1,4 +1,4 @@
-// v8 - Multi-museum: Met + Art Institute Chicago + Rijksmuseum + V&A + Wikimedia + Cleveland Museum of Art
+// v9 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia + Cleveland + Smithsonian
 
 async function fetchWikimediaImage(title, artist) {
 try {
@@ -76,6 +76,24 @@ return { primaryImage: image.url, museum: 'Cleveland Museum of Art' };
 } catch(e) { return null; }
 }
 
+async function fetchSmithsonianData(title, artist) {
+try {
+const key = process.env.SMITHSONIAN_API_KEY;
+if (!key) return null;
+const q = encodeURIComponent(title + ' ' + artist);
+const res = await fetch('https://api.si.edu/openaccess/api/v1.0/search?q=' + q + '&api_key=' + key + '&rows=1&media.type=Images');
+const data = await res.json();
+const row = data && data.response && data.response.rows && data.response.rows[0];
+if (!row) return null;
+const media = row.content && row.content.descriptiveNonRepeating && row.content.descriptiveNonRepeating.online_media && row.content.descriptiveNonRepeating.online_media.media;
+if (!media || !media[0]) return null;
+const imageUrl = media[0].thumbnail || media[0].content;
+if (!imageUrl) return null;
+const museumName = row.content && row.content.descriptiveNonRepeating && row.content.descriptiveNonRepeating.data_source || 'Smithsonian Institution';
+return { primaryImage: imageUrl, museum: museumName };
+} catch(e) { return null; }
+}
+
 async function fetchArtworkImage(title, artist) {
 if (!title || title === 'Unknown work') return null;
 const [wiki, ...museumResults] = await Promise.allSettled([
@@ -84,6 +102,7 @@ fetchAICData(title, artist),
 fetchRijksData(title, artist),
 fetchVAData(title, artist),
 fetchClevelandData(title, artist),
+fetchSmithsonianData(title, artist),
 fetchMetData(title, artist)
 ]);
 if (wiki.status === 'fulfilled' && wiki.value) return { primaryImage: wiki.value, museum: null };

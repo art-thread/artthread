@@ -1,20 +1,14 @@
-// v10 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia Commons + Cleveland + Smithsonian
+// v11 - revert Wikimedia to Wikipedia (was working for anchor thumbnails)
 
 async function fetchWikimediaImage(title, artist) {
 try {
 const q = encodeURIComponent(title + ' ' + artist);
-const res = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo&iiprop=url|thumburl|thumbmime&iiurlwidth=400&format=json&origin=*');
+const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=400&format=json&origin=*');
 const data = await res.json();
 const pages = data && data.query && data.query.pages;
 if (!pages) return null;
-const items = Object.values(pages);
-for (const item of items) {
-  const info = item.imageinfo && item.imageinfo[0];
-  if (!info) continue;
-  const url = info.thumburl || info.url;
-  if (url && (url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.includes('thumb'))) return url;
-}
-return null;
+const page = Object.values(pages)[0];
+return page && page.thumbnail ? page.thumbnail.source : null;
 } catch(e) { return null; }
 }
 

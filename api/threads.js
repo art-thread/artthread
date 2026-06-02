@@ -1,4 +1,4 @@
-// v14 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia + Cleveland + Smithsonian + NGA + Europeana + Mia
+// v15 - Multi-museum: Met + AIC + Rijksmuseum + V&A + Wikimedia + Cleveland + Smithsonian + NGA + Europeana + Mia + Getty + Tate
 
 async function fetchWikimediaImage(title, artist) {
 try {
@@ -137,6 +137,34 @@ return { primaryImage: imageUrl, museum: 'Minneapolis Institute of Art' };
 } catch(e) { return null; }
 }
 
+async function fetchGettyData(title, artist) {
+try {
+const q = encodeURIComponent(title + ' ' + artist);
+const res = await fetch('https://data.getty.edu/museum/collection/search?q=' + q + '&limit=1');
+const data = await res.json();
+const item = data && data.items && data.items[0];
+if (!item || !item.id) return null;
+const objRes = await fetch(item.id);
+const obj = await objRes.json();
+const imageId = obj && obj.subject_of && obj.subject_of[0] && obj.subject_of[0].digitally_shown_by && obj.subject_of[0].digitally_shown_by[0] && obj.subject_of[0].digitally_shown_by[0].access_point && obj.subject_of[0].digitally_shown_by[0].access_point[0] && obj.subject_of[0].digitally_shown_by[0].access_point[0].id;
+if (!imageId) return null;
+return { primaryImage: imageId, museum: 'J. Paul Getty Museum, Los Angeles' };
+} catch(e) { return null; }
+}
+
+async function fetchTateData(title, artist) {
+try {
+const q = encodeURIComponent(title + ' ' + artist);
+const res = await fetch('https://www.tate.org.uk/api/v1/artworks?query=' + q + '&size=1');
+const data = await res.json();
+const work = data && data.results && data.results[0];
+if (!work) return null;
+const imageUrl = work.thumbnailUrl || (work.acno ? 'https://www.tate.org.uk/art/images/' + work.acno.substring(0,2) + '/' + work.acno + '_10.jpg' : null);
+if (!imageUrl) return null;
+return { primaryImage: imageUrl, museum: 'Tate, London' };
+} catch(e) { return null; }
+}
+
 async function fetchArtworkImage(title, artist) {
 if (!title || title === 'Unknown work') return null;
 const [wiki, ...museumResults] = await Promise.allSettled([
@@ -149,6 +177,8 @@ fetchSmithsonianData(title, artist),
 fetchNGAData(title, artist),
 fetchEuropeanaData(title, artist),
 fetchMiaData(title, artist),
+fetchGettyData(title, artist),
+fetchTateData(title, artist),
 fetchMetData(title, artist)
 ]);
 if (wiki.status === 'fulfilled' && wiki.value) return { primaryImage: wiki.value, museum: null };

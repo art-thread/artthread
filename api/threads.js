@@ -1,4 +1,26 @@
-// v16 - Move Wikipedia to last resort, museum APIs first for better thumbnail accuracy
+// v17 - Strict title matching to reject fuzzy near-miss results (e.g. AIC returning "Rescue of the Survivors of the Raft of the Medusa" for "Raft of the Medusa")
+
+function normalizeTitle(s) {
+if (!s) return '';
+return s.toLowerCase()
+.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+.replace(/[^a-z0-9 ]/g, ' ')
+.replace(/\b(the|a|an|of|le|la|les|el|il|der|die|das)\b/g, ' ')
+.replace(/\s+/g, ' ')
+.trim();
+}
+
+function titleMatches(query, candidate) {
+const a = normalizeTitle(query);
+const b = normalizeTitle(candidate);
+if (!a || !b) return false;
+if (a === b) return true;
+// allow exact containment only if lengths are close (avoids "raft medusa" matching "rescue survivors raft medusa")
+const shorter = a.length <= b.length ? a : b;
+const longer = a.length <= b.length ? b : a;
+if (longer.includes(shorter) && shorter.length / longer.length >= 0.7) return true;
+return false;
+}
 
 async function fetchWikimediaImage(title, artist) {
 try {
@@ -22,6 +44,7 @@ const objRes = await fetch('https://collectionapi.metmuseum.org/public/collectio
 const obj = await objRes.json();
 const image = obj.primaryImage || obj.primaryImageSmall || null;
 if (!image) return null;
+if (!titleMatches(title, obj.title)) return null;
 return { metId: obj.objectID, primaryImage: image, museum: obj.repository || 'Metropolitan Museum of Art, New York' };
 } catch(e) { return null; }
 }
@@ -29,10 +52,12 @@ return { metId: obj.objectID, primaryImage: image, museum: obj.repository || 'Me
 async function fetchAICData(title, artist) {
 try {
 const q = encodeURIComponent(title + ' ' + artist);
-const res = await fetch('https://api.artic.edu/api/v1/artworks/search?q=' + q + '&limit=1&fields=id,title,image_id');
+const res = await fetch('https://api.artic.edu/api/v1/artworks/search?q=' + q + '&limit=3&fields=id,title,image_id');
 const data = await res.json();
-const work = data && data.data && data.data[0];
-if (!work || !work.image_id) return null;
+const works = data && data.data;
+if (!works || !works.length) return null;
+const work = works.find(w => w.image_id && titleMatches(title, w.title));
+if (!work) return null;
 return { primaryImage: 'https://www.artic.edu/iiif/2/' + work.image_id + '/full/400,/0/default.jpg', museum: 'Art Institute of Chicago' };
 } catch(e) { return null; }
 }
@@ -46,6 +71,7 @@ const res = await fetch('https://www.rijksmuseum.nl/api/en/collection?key=' + ke
 const data = await res.json();
 const work = data && data.artObjects && data.artObjects[0];
 if (!work || !work.webImage || !work.webImage.url) return null;
+if (!titleMatches(title, work.title)) return null;
 return { primaryImage: work.webImage.url, museum: 'Rijksmuseum, Amsterdam' };
 } catch(e) { return null; }
 }
@@ -59,6 +85,8 @@ const record = data && data.records && data.records[0];
 if (!record) return null;
 const imageId = record._primaryImageId;
 if (!imageId) return null;
+const candTitle = record._primaryTitle || (record.titles && record.titles[0] && record.titles[0].title) || '';
+if (!titleMatches(title, candTitle)) return null;
 return { primaryImage: 'https://framemark.vam.ac.uk/collections/' + imageId + '/full/400,/0/default.jpg', museum: 'Victoria and Albert Museum, London' };
 } catch(e) { return null; }
 }
@@ -66,12 +94,13 @@ return { primaryImage: 'https://framemark.vam.ac.uk/collections/' + imageId + '/
 async function fetchClevelandData(title, artist) {
 try {
 const q = encodeURIComponent(title + ' ' + artist);
-const res = await fetch('https://openaccess-api.clevelandart.org/api/artworks/?q=' + q + '&has_image=1&limit=1');
+const res = await fetch('https://openaccess-api.clevelandart.org/api/artworks/?q=' + q + '&has_image=1&limit=3');
 const data = await res.json();
-const work = data && data.data && data.data[0];
+const works = data && data.data;
+if (!works || !works.length) return null;
+const work = works.find(w => titleMatches(title, w.title) && w.images && (w.images.web || w.images.print));
 if (!work) return null;
-const image = work.images && (work.images.web || work.images.print);
-if (!image || !image.url) return null;
+const image = work.images.web || work.images.print;
 return { primaryImage: image.url, museum: 'Cleveland Museum of Art' };
 } catch(e) { return null; }
 }
@@ -81,9 +110,11 @@ try {
 const key = process.env.SMITHSONIAN_API_KEY;
 if (!key) return null;
 const q = encodeURIComponent(title + ' ' + artist);
-const res = await fetch('https://api.si.edu/openaccess/api/v1.0/search?q=' + q + '&api_key=' + key + '&rows=1&media.type=Images');
+const res = await fetch('https://api.si.edu/openaccess/api/v1.0/search?q=' + q + '&api_key=' + key + '&rows=3&media.type=Images');
 const data = await res.json();
-const row = data && data.response && data.response.rows && data.response.rows[0];
+const rows = data && data.response && data.response.rows;
+if (!rows || !rows.length) return null;
+const row = rows.find(r => titleMatches(title, r.title));
 if (!row) return null;
 const media = row.content && row.content.descriptiveNonRepeating && row.content.descriptiveNonRepeating.online_media && row.content.descriptiveNonRepeating.online_media.media;
 if (!media || !media[0]) return null;
@@ -96,12 +127,13 @@ return { primaryImage: imageUrl, museum: museumName };
 
 async function fetchNGAData(title, artist) {
 try {
-const res = await fetch('https://api.nga.gov/art/tms/objects?title=' + encodeURIComponent(title) + '&artist=' + encodeURIComponent(artist) + '&hasimage=1&limit=1&offset=0');
+const res = await fetch('https://api.nga.gov/art/tms/objects?title=' + encodeURIComponent(title) + '&artist=' + encodeURIComponent(artist) + '&hasimage=1&limit=3&offset=0');
 const data = await res.json();
-const work = data && data.data && data.data[0];
+const works = data && data.data;
+if (!works || !works.length) return null;
+const work = works.find(w => w.primaryimage && titleMatches(title, w.title));
 if (!work) return null;
-const imageUrl = work.primaryimage ? 'https://api.nga.gov/iiif/' + work.primaryimage + '/full/!400,400/0/default.jpg' : null;
-if (!imageUrl) return null;
+const imageUrl = 'https://api.nga.gov/iiif/' + work.primaryimage + '/full/!400,400/0/default.jpg';
 return { primaryImage: imageUrl, museum: 'National Gallery of Art, Washington DC' };
 } catch(e) { return null; }
 }
@@ -111,12 +143,16 @@ try {
 const key = process.env.EUROPEANA_API_KEY;
 if (!key) return null;
 const q = encodeURIComponent('"' + title + '" "' + artist + '"');
-const res = await fetch('https://api.europeana.eu/record/v2/search.json?wskey=' + key + '&query=' + q + '&qf=TYPE%3AIMAGE&rows=1&profile=rich');
+const res = await fetch('https://api.europeana.eu/record/v2/search.json?wskey=' + key + '&query=' + q + '&qf=TYPE%3AIMAGE&rows=5&profile=rich');
 const data = await res.json();
-const item = data && data.items && data.items[0];
+const items = data && data.items;
+if (!items || !items.length) return null;
+const item = items.find(it => {
+const t = (it.title && it.title[0]) || (it.dcTitleLangAware && Object.values(it.dcTitleLangAware)[0] && Object.values(it.dcTitleLangAware)[0][0]) || '';
+return it.edmPreview && it.edmPreview[0] && titleMatches(title, t);
+});
 if (!item) return null;
-const imageUrl = item.edmPreview && item.edmPreview[0];
-if (!imageUrl) return null;
+const imageUrl = item.edmPreview[0];
 const museum = item.dataProvider && item.dataProvider[0] || 'Europeana';
 return { primaryImage: imageUrl, museum: museum };
 } catch(e) { return null; }
@@ -125,13 +161,13 @@ return { primaryImage: imageUrl, museum: museum };
 async function fetchMiaData(title, artist) {
 try {
 const q = encodeURIComponent(title + ' ' + artist);
-const res = await fetch('https://search.artsmia.org/?' + q + '&size=1');
+const res = await fetch('https://search.artsmia.org/?' + q + '&size=3');
 const data = await res.json();
-const hit = data && data.hits && data.hits.hits && data.hits.hits[0];
+const hits = data && data.hits && data.hits.hits;
+if (!hits || !hits.length) return null;
+const hit = hits.find(h => h._source && h._source.image && titleMatches(title, h._source.title));
 if (!hit) return null;
-const src = hit._source;
-if (!src || !src.image) return null;
-const id = src.id;
+const id = hit._source.id;
 const imageUrl = 'https://cdn.dx.artsmia.org/thumbs/iiif/' + id + '/full/400,/0/default.jpg';
 return { primaryImage: imageUrl, museum: 'Minneapolis Institute of Art' };
 } catch(e) { return null; }
@@ -146,6 +182,8 @@ const item = data && data.items && data.items[0];
 if (!item || !item.id) return null;
 const objRes = await fetch(item.id);
 const obj = await objRes.json();
+const objTitle = obj && obj._label || (obj && obj.identified_by && obj.identified_by[0] && obj.identified_by[0].content) || '';
+if (!titleMatches(title, objTitle)) return null;
 const imageId = obj && obj.subject_of && obj.subject_of[0] && obj.subject_of[0].digitally_shown_by && obj.subject_of[0].digitally_shown_by[0] && obj.subject_of[0].digitally_shown_by[0].access_point && obj.subject_of[0].digitally_shown_by[0].access_point[0] && obj.subject_of[0].digitally_shown_by[0].access_point[0].id;
 if (!imageId) return null;
 return { primaryImage: imageId, museum: 'J. Paul Getty Museum, Los Angeles' };
@@ -155,9 +193,11 @@ return { primaryImage: imageId, museum: 'J. Paul Getty Museum, Los Angeles' };
 async function fetchTateData(title, artist) {
 try {
 const q = encodeURIComponent(title + ' ' + artist);
-const res = await fetch('https://www.tate.org.uk/api/v1/artworks?query=' + q + '&size=1');
+const res = await fetch('https://www.tate.org.uk/api/v1/artworks?query=' + q + '&size=3');
 const data = await res.json();
-const work = data && data.results && data.results[0];
+const works = data && data.results;
+if (!works || !works.length) return null;
+const work = works.find(w => titleMatches(title, w.title));
 if (!work) return null;
 const imageUrl = work.thumbnailUrl || (work.acno ? 'https://www.tate.org.uk/art/images/' + work.acno.substring(0,2) + '/' + work.acno + '_10.jpg' : null);
 if (!imageUrl) return null;

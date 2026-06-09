@@ -1,4 +1,4 @@
-// v18 - Anonymous event logging to Supabase thread_events (anon_id + depth accepted from client, fire-safe insert via REST)
+// v19 - Log edge_type (taste-movement signal) and connection_followed events from client jumps
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -253,7 +253,7 @@ res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 if (req.method === 'OPTIONS') return res.status(200).end();
 if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-const { query, imageBase64, imageType, anonId, depth } = req.body;
+const { query, imageBase64, imageType, anonId, depth, edgeType } = req.body;
 const userContent = [];
 if (imageBase64) {
 userContent.push({ type: 'image', source: { type: 'base64', media_type: imageType || 'image/jpeg', data: imageBase64 }});
@@ -312,7 +312,8 @@ if (img.metId) conn.metId = img.metId;
 
 await logEvent({
 anon_id: anonId || null,
-event_type: imageBase64 ? 'image_upload' : 'text_search',
+event_type: imageBase64 ? 'image_upload' : ((depth || 0) > 0 ? 'connection_followed' : 'text_search'),
+edge_type: edgeType || null,
 query: query || (result.anchor && result.anchor.title) || null,
 depth: depth || 0,
 payload: {

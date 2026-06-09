@@ -1,4 +1,4 @@
-// v17 - Strict title matching to reject fuzzy near-miss results (e.g. AIC returning "Rescue of the Survivors of the Raft of the Medusa" for "Raft of the Medusa")
+// v18 - Anonymous event logging to Supabase thread_events (anon_id + depth accepted from client, fire-safe insert via REST)
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -20,6 +20,22 @@ const shorter = a.length <= b.length ? a : b;
 const longer = a.length <= b.length ? b : a;
 if (longer.includes(shorter) && shorter.length / longer.length >= 0.7) return true;
 return false;
+}
+
+async function logEvent(event) {
+try {
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) return;
+await fetch(process.env.SUPABASE_URL + '/rest/v1/thread_events', {
+method: 'POST',
+headers: {
+'Content-Type': 'application/json',
+'apikey': process.env.SUPABASE_SERVICE_KEY,
+'Authorization': 'Bearer ' + process.env.SUPABASE_SERVICE_KEY,
+'Prefer': 'return=minimal'
+},
+body: JSON.stringify(event)
+});
+} catch (e) { /* logging must never break the product */ }
 }
 
 async function fetchWikimediaImage(title, artist) {
@@ -237,7 +253,7 @@ res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 if (req.method === 'OPTIONS') return res.status(200).end();
 if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-const { query, imageBase64, imageType } = req.body;
+const { query, imageBase64, imageType, anonId, depth } = req.body;
 const userContent = [];
 if (imageBase64) {
 userContent.push({ type: 'image', source: { type: 'base64', media_type: imageType || 'image/jpeg', data: imageBase64 }});
@@ -293,6 +309,18 @@ if (img.metId) conn.metId = img.metId;
 }
 }));
 }
+
+await logEvent({
+anon_id: anonId || null,
+event_type: imageBase64 ? 'image_upload' : 'text_search',
+query: query || (result.anchor && result.anchor.title) || null,
+depth: depth || 0,
+payload: {
+anchor_title: result.anchor && result.anchor.title,
+anchor_artist: result.anchor && result.anchor.artist,
+threads: (result.connections || []).map(c => c.thread)
+}
+});
 
 return res.status(200).json(result);
 } catch (err) {

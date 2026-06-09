@@ -109,6 +109,12 @@
 </div>
 <script>
 let imageBase64 = null, imageType = null;
+const anonId = (function(){
+  let id = localStorage.getItem('at_anon');
+  if (!id) { id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2); localStorage.setItem('at_anon', id); }
+  return id;
+})();
+let threadDepth = 0, pendingJump = null;
 async function handleUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -162,11 +168,14 @@ async function findThreads() {
   const btn = document.getElementById('find-btn');
   btn.disabled = true;
   document.getElementById('output').innerHTML = `<div class="status"><div class="spinner"></div>Searching collections and finding connections...</div>`;
+  const depth = pendingJump ? ++threadDepth : (threadDepth = 0);
+  const edgeType = pendingJump ? pendingJump.edge : null;
+  pendingJump = null;
   try {
     const res = await fetch('/api/threads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, imageBase64, imageType })
+      body: JSON.stringify({ query, imageBase64, imageType, anonId, depth, edgeType })
     });
     const result = await res.json();
     if (result.error) throw new Error(result.error);
@@ -185,13 +194,14 @@ const thumb = thumbSrc ? `<img class="anchor-thumb" src="${thumbSrc}" onerror="t
   let html = `<div class="results"><div class="results-header">Threads from <em>${a.title}</em></div><div class="anchor-card">${thumb}<div><div class="anchor-label">Your artwork</div><div class="anchor-title">${a.title}</div><div class="anchor-meta">${a.artist} · ${a.date} · ${a.museum}</div></div></div><div class="thread-label">Connected across time</div>`;
   conns.forEach((c, i) => {
     const ct = c.metId ? `<img class="conn-thumb" src="https://collectionapi.metmuseum.org/api/collection/v1/iiif/${c.metId}/main-image" onerror="this.style.background='#f5f4f0'" alt="">` : `<div class="conn-thumb"></div>`;
-    html += `<div class="conn-card" style="animation-delay:${i*0.1}s;cursor:pointer;" onclick="jumpTo(this)"data-title="${c.title.replace(/"/g,'&quot;')}"data-artist="${c.artist.replace(/"/g,'&quot;')}">${ct}<div><div class="pill ${pillClass(c.thread)}">${c.thread}</div><div class="conn-title">${c.title}</div><div class="conn-meta">${c.artist} · ${c.date} · ${c.museum}</div><div class="throughline">"${c.throughline}"</div></div></div>`;
+    html += `<div class="conn-card" style="animation-delay:${i*0.1}s;cursor:pointer;" onclick="jumpTo(this)" data-thread="${c.thread}" data-title="${c.title.replace(/"/g,'&quot;')}"data-artist="${c.artist.replace(/"/g,'&quot;')}">${ct}<div><div class="pill ${pillClass(c.thread)}">${c.thread}</div><div class="conn-title">${c.title}</div><div class="conn-meta">${c.artist} · ${c.date} · ${c.museum}</div><div class="throughline">"${c.throughline}"</div></div></div>`;
   });
   document.getElementById('output').innerHTML = html + '</div>';
 }
 function jumpTo(el) {
   const title = el.getAttribute('data-title');
   const artist = el.getAttribute('data-artist');
+  pendingJump = { edge: el.getAttribute('data-thread') || null };
   document.getElementById('art-input').value = title + (artist ? ', ' + artist : '');
   window.scrollTo({top: 0, behavior: 'smooth'});
   setTimeout(findThreads, 300);

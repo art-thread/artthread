@@ -74,7 +74,7 @@ const works = data && data.data;
 if (!works || !works.length) return null;
 const work = works.find(w => w.image_id && titleMatches(title, w.title));
 if (!work) return null;
-return { primaryImage: 'https://www.artic.edu/iiif/2/' + work.image_id + '/full/400,/0/default.jpg', museum: 'Art Institute of Chicago' };
+return { primaryImage: 'https://www.artic.edu/iiif/2/' + work.image_id + '/full/800,/0/default.jpg', museum: 'Art Institute of Chicago' };
 } catch(e) { return null; }
 }
 
@@ -103,7 +103,7 @@ const imageId = record._primaryImageId;
 if (!imageId) return null;
 const candTitle = record._primaryTitle || (record.titles && record.titles[0] && record.titles[0].title) || '';
 if (!titleMatches(title, candTitle)) return null;
-return { primaryImage: 'https://framemark.vam.ac.uk/collections/' + imageId + '/full/400,/0/default.jpg', museum: 'Victoria and Albert Museum, London' };
+return { primaryImage: 'https://framemark.vam.ac.uk/collections/' + imageId + '/full/800,/0/default.jpg', museum: 'Victoria and Albert Museum, London' };
 } catch(e) { return null; }
 }
 
@@ -134,7 +134,7 @@ const row = rows.find(r => titleMatches(title, r.title));
 if (!row) return null;
 const media = row.content && row.content.descriptiveNonRepeating && row.content.descriptiveNonRepeating.online_media && row.content.descriptiveNonRepeating.online_media.media;
 if (!media || !media[0]) return null;
-const imageUrl = media[0].thumbnail || media[0].content;
+const imageUrl = media[0].content || media[0].thumbnail;
 if (!imageUrl) return null;
 const museumName = row.content && row.content.descriptiveNonRepeating && row.content.descriptiveNonRepeating.data_source || 'Smithsonian Institution';
 return { primaryImage: imageUrl, museum: museumName };
@@ -149,7 +149,7 @@ const works = data && data.data;
 if (!works || !works.length) return null;
 const work = works.find(w => w.primaryimage && titleMatches(title, w.title));
 if (!work) return null;
-const imageUrl = 'https://api.nga.gov/iiif/' + work.primaryimage + '/full/!400,400/0/default.jpg';
+const imageUrl = 'https://api.nga.gov/iiif/' + work.primaryimage + '/full/!800,800/0/default.jpg';
 return { primaryImage: imageUrl, museum: 'National Gallery of Art, Washington DC' };
 } catch(e) { return null; }
 }
@@ -165,10 +165,10 @@ const items = data && data.items;
 if (!items || !items.length) return null;
 const item = items.find(it => {
 const t = (it.title && it.title[0]) || (it.dcTitleLangAware && Object.values(it.dcTitleLangAware)[0] && Object.values(it.dcTitleLangAware)[0][0]) || '';
-return it.edmPreview && it.edmPreview[0] && titleMatches(title, t);
+return (it.edmIsShownBy && it.edmIsShownBy[0] || it.edmPreview && it.edmPreview[0]) && titleMatches(title, t);
 });
 if (!item) return null;
-const imageUrl = item.edmPreview[0];
+const imageUrl = (item.edmIsShownBy && item.edmIsShownBy[0]) || item.edmPreview[0];
 const museum = item.dataProvider && item.dataProvider[0] || 'Europeana';
 return { primaryImage: imageUrl, museum: museum };
 } catch(e) { return null; }
@@ -184,7 +184,7 @@ if (!hits || !hits.length) return null;
 const hit = hits.find(h => h._source && h._source.image && titleMatches(title, h._source.title));
 if (!hit) return null;
 const id = hit._source.id;
-const imageUrl = 'https://cdn.dx.artsmia.org/thumbs/iiif/' + id + '/full/400,/0/default.jpg';
+const imageUrl = 'https://cdn.dx.artsmia.org/thumbs/iiif/' + id + '/full/800,/0/default.jpg';
 return { primaryImage: imageUrl, museum: 'Minneapolis Institute of Art' };
 } catch(e) { return null; }
 }

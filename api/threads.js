@@ -244,6 +244,56 @@ if (wiki) return { primaryImage: wiki, museum: null };
 return null;
 }
 
+async function catalogueQuery(params) {
+try {
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) return [];
+const res = await fetch(process.env.SUPABASE_URL + '/rest/v1/artworks?' + params, {
+headers: {
+'apikey': process.env.SUPABASE_SERVICE_KEY,
+'Authorization': 'Bearer ' + process.env.SUPABASE_SERVICE_KEY
+}
+});
+if (!res.ok) return [];
+return await res.json();
+} catch (e) { return []; }
+}
+
+// Catalogue sift #1: does this anchor already exist in our own catalogue (manual adds or past finds)?
+// If so, its image/tags/notes take priority over a fresh museum-API lookup.
+async function fetchCatalogueMatch(title, artist) {
+if (!title) return null;
+const rows = await catalogueQuery(
+'title=ilike.*' + encodeURIComponent(title) + '*&select=*&limit=1'
+);
+return rows && rows[0] ? rows[0] : null;
+}
+
+// Catalogue sift #2: broaden beyond what the LLM proposed. Pull catalogued works that share an
+// artist with the anchor or any LLM connection, or share a tag with the anchor's catalogue match —
+// surfaces things you've manually added or found before that the LLM wouldn't think to suggest.
+async function fetchCatalogueBroaden(artistNames, tags, excludeTitles) {
+const seen = new Set();
+const out = [];
+const clauses = [];
+for (const a of (artistNames || []).filter(Boolean)) {
+clauses.push('artist.ilike.*' + encodeURIComponent(a) + '*');
+}
+for (const t of (tags || []).filter(Boolean)) {
+clauses.push('tags.cs.{' + encodeURIComponent(t) + '}');
+}
+if (!clauses.length) return out;
+const rows = await catalogueQuery('or=(' + clauses.join(',') + ')&select=*&limit=6');
+const excludeLower = new Set((excludeTitles || []).map(t => (t || '').toLowerCase()));
+for (const row of rows) {
+const key = (row.title || '').toLowerCase();
+if (!key || excludeLower.has(key) || seen.has(key)) continue;
+seen.add(key);
+out.push(row);
+if (out.length >= 2) break;
+}
+return out;
+}
+
 const ALBERTINA = ''
 
 module.exports = async function handler(req, res) {
@@ -287,12 +337,20 @@ if (!jsonMatch) return res.status(500).json({ error: 'No JSON found: ' + text.su
 
 const result = JSON.parse(jsonMatch[0]);
 
+// Sift #1: check our own catalogue for this anchor before falling back to live museum APIs.
+const catalogueMatch = await fetchCatalogueMatch(result.anchor.title, result.anchor.artist);
+if (catalogueMatch) {
+if (catalogueMatch.primary_image) result.anchor.primaryImage = catalogueMatch.primary_image;
+if (catalogueMatch.museum) result.anchor.museum = catalogueMatch.museum;
+if (catalogueMatch.notes) result.anchor.catalogueNotes = catalogueMatch.notes;
+}
+
 const isMetWork = result.anchor.museum && result.anchor.museum.toLowerCase().includes('metropolitan');
 if (isMetWork) {
 const anchorMet = await fetchMetData(result.anchor.title, result.anchor.artist);
 if (anchorMet) {
 result.anchor.metId = anchorMet.metId;
-result.anchor.primaryImage = anchorMet.primaryImage;
+result.anchor.primaryImage = result.anchor.primaryImage || anchorMet.primaryImage;
 }
 }
 if (!result.anchor.primaryImage) {
@@ -302,12 +360,39 @@ if (anchorImg && anchorImg.primaryImage) result.anchor.primaryImage = anchorImg.
 
 if (result.connections && result.connections.length) {
 await Promise.all(result.connections.map(async (conn) => {
+const connCatalogueMatch = await fetchCatalogueMatch(conn.title, conn.artist);
+if (connCatalogueMatch && connCatalogueMatch.primary_image) {
+conn.primaryImage = connCatalogueMatch.primary_image;
+}
 const img = await fetchArtworkImage(conn.title, conn.artist);
 if (img && img.primaryImage) {
-conn.primaryImage = img.primaryImage;
+conn.primaryImage = conn.primaryImage || img.primaryImage;
 if (img.metId) conn.metId = img.metId;
 }
 }));
+}
+
+// Sift #2: broaden beyond the LLM's 3 picks with anything catalogued (manual adds, past finds)
+// that shares an artist or theme tag — so works outside the LLM's general knowledge can surface.
+const knownArtists = [result.anchor.artist, ...(result.connections || []).map(c => c.artist)];
+const knownTitles = [result.anchor.title, ...(result.connections || []).map(c => c.title)];
+const broadened = await fetchCatalogueBroaden(
+knownArtists,
+catalogueMatch && catalogueMatch.tags,
+knownTitles
+);
+const KNOWN_THREADS = ['light','grief','power','nature','chaos','time','identity'];
+for (const row of broadened) {
+const rowTag = (row.tags || []).find(t => KNOWN_THREADS.includes(t));
+result.connections.push({
+title: row.title,
+artist: row.artist,
+date: row.date_display,
+museum: row.museum,
+thread: rowTag || 'time',
+throughline: row.notes || 'From your own catalogue.',
+primaryImage: row.primary_image
+});
 }
 
 await logEvent({

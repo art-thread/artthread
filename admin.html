@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ArtThread — Add to catalogue</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, 'DM Sans', sans-serif; background: #f5f2ed; color: #1a1816; max-width: 560px; margin: 40px auto; padding: 0 20px; }
+  h1 { font-family: 'Cormorant Garamond', serif; font-weight: 400; font-size: 26px; margin-bottom: 4px; }
+  .sub { color: rgba(26,24,22,0.55); font-size: 13px; margin-bottom: 24px; }
+  label { display: block; font-size: 12px; font-weight: 500; margin: 14px 0 4px; color: rgba(26,24,22,0.78); }
+  input, textarea { width: 100%; padding: 9px 11px; border: 1px solid rgba(26,24,22,0.2); border-radius: 6px; font-size: 14px; font-family: inherit; background: #fff; }
+  textarea { resize: vertical; min-height: 60px; }
+  button { margin-top: 18px; padding: 10px 20px; background: #1a1816; color: #f5f2ed; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #status { margin-top: 14px; font-size: 13px; }
+  .ok { color: #2e7d4f; }
+  .err { color: #b3261e; }
+</style>
+</head>
+<body>
+  <h1>Add to catalogue</h1>
+  <div class="sub">Adds an artwork to the ArtThread Supabase catalogue, independent of any search — for works not in the museum APIs, new finds, or anything you want surfaced in future threads.</div>
+
+  <form id="f">
+    <label>Title *</label>
+    <input name="title" required>
+    <label>Artist</label>
+    <input name="artist">
+    <label>Date</label>
+    <input name="date" placeholder="e.g. 1851">
+    <label>Museum / collection</label>
+    <input name="museum">
+    <label>Image URL</label>
+    <input name="primaryImage" placeholder="https://...">
+    <label>Tags (comma-separated — used to surface this in related threads)</label>
+    <input name="tags" placeholder="e.g. light, baroque, portraiture">
+    <label>Notes (used as the throughline if this surfaces as a connection)</label>
+    <textarea name="notes"></textarea>
+    <label>Admin secret (only if one's been set in Vercel)</label>
+    <input name="secret" type="password">
+    <button type="submit">Add artwork</button>
+  </form>
+  <div id="status"></div>
+
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button');
+  const statusEl = document.getElementById('status');
+  btn.disabled = true;
+  statusEl.textContent = 'Saving...';
+  statusEl.className = '';
+  const fd = new FormData(e.target);
+  const body = Object.fromEntries(fd.entries());
+  try {
+    const res = await fetch('/api/admin-artwork', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (res.ok) {
+      statusEl.textContent = 'Added: ' + (data.artwork && data.artwork.title || body.title);
+      statusEl.className = 'ok';
+      e.target.reset();
+    } else {
+      statusEl.textContent = 'Error: ' + JSON.stringify(data.error || data);
+      statusEl.className = 'err';
+    }
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+    statusEl.className = 'err';
+  }
+  btn.disabled = false;
+});
+</script>
+</body>
+</html>

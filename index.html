@@ -45,15 +45,17 @@
   .results { margin-top: 1.5rem; }
   .results-header { font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; margin-bottom: 1rem; padding-bottom: 8px; border-bottom: 0.5px solid #e5e5e5; }
   .results-header em { font-style: italic; color: #888; }
-  .anchor-card { background: #fff; border: 0.5px solid #e5e5e5; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; gap: 12px; }
-  .anchor-thumb { width: 64px; height: 64px; flex-shrink: 0; border-radius: 8px; background: #f5f4f0; object-fit: cover; border: 0.5px solid #e5e5e5; }
+  .anchor-card { background: #fff; border: 0.5px solid #e5e5e5; border-radius: 12px; margin-bottom: 1.5rem; overflow: hidden; }
+  .anchor-thumb { width: 100%; height: auto; max-height: 60vh; object-fit: contain; display: block; background: #f5f4f0; }
+  .anchor-body { padding: 0.9rem 1.25rem 1.1rem; }
   .anchor-label { font-size: 10px; letter-spacing: 0.06em; color: #bbb; text-transform: uppercase; margin-bottom: 4px; }
   .anchor-title { font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; font-weight: 500; line-height: 1.3; }
   .anchor-meta { font-size: 12px; color: #888; margin-top: 3px; }
   .thread-label { font-size: 11px; letter-spacing: 0.06em; color: #bbb; text-transform: uppercase; margin-bottom: 10px; }
-  .conn-card { background: #fff; border: 0.5px solid #e5e5e5; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; display: flex; gap: 12px; opacity: 0; transform: translateY(6px); animation: fadeUp 0.35s forwards; }
+  .conn-card { background: #fff; border: 0.5px solid #e5e5e5; border-radius: 12px; margin-bottom: 10px; overflow: hidden; cursor: pointer; opacity: 0; transform: translateY(6px); animation: fadeUp 0.35s forwards; }
   @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
-  .conn-thumb { width: 72px; height: 72px; flex-shrink: 0; border-radius: 8px; background: #f5f4f0; object-fit: cover; border: 0.5px solid #e5e5e5; }
+  .conn-thumb { width: 100%; height: auto; max-height: 65vh; object-fit: contain; display: block; background: #f5f4f0; }
+  .conn-body { padding: 0.9rem 1.25rem 1.1rem; }
   .conn-title { font-family: 'Cormorant Garamond', serif; font-size: 1rem; font-weight: 500; line-height: 1.3; margin-bottom: 2px; }
   .conn-meta { font-size: 11px; color: #bbb; margin-bottom: 7px; }
   .pill { display: inline-block; font-size: 10px; font-weight: 500; padding: 2px 9px; border-radius: 20px; margin-bottom: 7px; }
@@ -190,11 +192,12 @@ function pillClass(t) {
 function renderResults(result) {
   const a = result.anchor, conns = result.connections || [];
   const thumbSrc = a.primaryImage || (a.metId ? `https://collectionapi.metmuseum.org/api/collection/v1/iiif/${a.metId}/main-image` : null);
-const thumb = thumbSrc ? `<img class="anchor-thumb" src="${thumbSrc}" onerror="this.style.display='none'" alt="">` : `<div class="anchor-thumb"></div>`;
-  let html = `<div class="results"><div class="results-header">Threads from <em>${a.title}</em></div><div class="anchor-card">${thumb}<div><div class="anchor-label">Your artwork</div><div class="anchor-title">${a.title}</div><div class="anchor-meta">${a.artist} · ${a.date} · ${a.museum}</div></div></div><div class="thread-label">Connected across time</div>`;
+  const thumb = thumbSrc ? `<img class="anchor-thumb" src="${thumbSrc}" onerror="this.style.display='none'" alt="">` : '';
+  let html = `<div class="results"><div class="results-header">Threads from <em>${a.title}</em></div><div class="anchor-card">${thumb}<div class="anchor-body"><div class="anchor-label">Your artwork</div><div class="anchor-title">${a.title}</div><div class="anchor-meta">${a.artist} · ${a.date} · ${a.museum}</div></div></div><div class="thread-label">Connected across time</div>`;
   conns.forEach((c, i) => {
-    const ct = c.metId ? `<img class="conn-thumb" src="https://collectionapi.metmuseum.org/api/collection/v1/iiif/${c.metId}/main-image" onerror="this.style.background='#f5f4f0'" alt="">` : `<div class="conn-thumb"></div>`;
-    html += `<div class="conn-card" style="animation-delay:${i*0.1}s;cursor:pointer;" onclick="jumpTo(this)" data-thread="${c.thread}" data-title="${c.title.replace(/"/g,'&quot;')}"data-artist="${c.artist.replace(/"/g,'&quot;')}">${ct}<div><div class="pill ${pillClass(c.thread)}">${c.thread}</div><div class="conn-title">${c.title}</div><div class="conn-meta">${c.artist} · ${c.date} · ${c.museum}</div><div class="throughline">"${c.throughline}"</div></div></div>`;
+    const cSrc = c.primaryImage || (c.metId ? `https://collectionapi.metmuseum.org/api/collection/v1/iiif/${c.metId}/main-image` : null);
+    const ct = cSrc ? `<img class="conn-thumb" src="${cSrc}" onerror="this.style.display='none'" alt="">` : '';
+    html += `<div class="conn-card" style="animation-delay:${i*0.1}s;" onclick="jumpTo(this)" data-thread="${c.thread}" data-title="${c.title.replace(/"/g,'&quot;')}" data-artist="${c.artist.replace(/"/g,'&quot;')}">${ct}<div class="conn-body"><div class="pill ${pillClass(c.thread)}">${c.thread}</div><div class="conn-title">${c.title}</div><div class="conn-meta">${c.artist} · ${c.date} · ${c.museum}</div><div class="throughline">"${c.throughline}"</div></div></div>`;
   });
   document.getElementById('output').innerHTML = html + '</div>';
 }

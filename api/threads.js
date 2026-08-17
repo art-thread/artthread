@@ -1,4 +1,4 @@
-// v22 - Retry wiki/Commons image search across title variants (full, stripped-of-parens, parenthetical) to handle LLM-paraphrased titles that don't rank well against the real title
+// v23 - Extract museum from Wikimedia Commons category tags as an authoritative location signal (fixes museums with no direct API, e.g. MFA Boston); apply same museum-correction to connection works
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -70,10 +70,23 @@ return null;
 } catch(e) { return null; }
 }
 
+function extractMuseumFromCategories(categories) {
+if (!categories) return null;
+for (const cat of categories) {
+const name = (cat.title || '').replace(/^Category:/, '');
+// Commons category convention: "Paintings by X in the Y Museum, City" / "... at the Y Gallery".
+const m = name.match(/\b(?:in|at) the (.+)$/i);
+if (m && /(museum|gallery|galleries|institute|gallerie|kunsthistorisches|pinacoteca|uffizi|hermitage|rijksmuseum|prado|louvre|\bmet\b)/i.test(m[1])) {
+return m[1].trim();
+}
+}
+return null;
+}
+
 async function tryCommonsSearch(queryText, artistLast) {
 try {
 const q = encodeURIComponent(queryText);
-const res = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo&iiprop=extmetadata|url&iiurlwidth=500&format=json&origin=*');
+const res = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo|categories&iiprop=extmetadata|url&iiurlwidth=500&cllimit=50&clshow=!hidden&format=json&origin=*');
 const data = await res.json();
 const pages = data && data.query && data.query.pages;
 if (!pages) return null;
@@ -85,7 +98,10 @@ const artistField = ((meta.Artist && meta.Artist.value) || '').toLowerCase();
 const descField = ((meta.ImageDescription && meta.ImageDescription.value) || '').toLowerCase();
 const pageTitle = (page.title || '').toLowerCase();
 if (!artistLast || artistField.includes(artistLast) || descField.includes(artistLast) || pageTitle.includes(artistLast)) {
-return info.thumburl || info.url;
+return {
+primaryImage: info.thumburl || info.url,
+museum: extractMuseumFromCategories(page.categories)
+};
 }
 }
 return null;
@@ -97,7 +113,7 @@ const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
 for (const t of titleVariants(title)) {
 const queryText = t + ' ' + (artist || '');
 const wikiHit = await tryWikipediaSearch(queryText, artistLast);
-if (wikiHit) return wikiHit;
+if (wikiHit) return { primaryImage: wikiHit, museum: null };
 const commonsHit = await tryCommonsSearch(queryText, artistLast);
 if (commonsHit) return commonsHit;
 }
@@ -294,7 +310,7 @@ for (const r of results) {
 if (r.status === 'fulfilled' && r.value && r.value.primaryImage) return r.value;
 }
 const wiki = await fetchWikimediaImage(title, artist);
-if (wiki) return { primaryImage: wiki, museum: null };
+if (wiki && wiki.primaryImage) return wiki;
 return null;
 }
 
@@ -425,6 +441,7 @@ const img = await fetchArtworkImage(conn.title, conn.artist);
 if (img && img.primaryImage) {
 conn.primaryImage = conn.primaryImage || img.primaryImage;
 if (img.metId) conn.metId = img.metId;
+if (img.museum) conn.museum = img.museum;
 }
 }));
 }

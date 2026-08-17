@@ -1,4 +1,10 @@
-// v29 - Add diagnostic timing/stage logging to the image-fetch pipeline (museum APIs / Wikidata / Wikipedia-Commons, per-stage duration and hit/miss, actual error messages instead of silent catches) to diagnose the multi-connection thumbnail-miss issue via Vercel logs
+// v30 - Fix root cause of missing thumbnails tonight: add required User-Agent header to all Wikidata/Wikipedia/Commons calls. Confirmed via Vercel logs that every such call was returning 429 (rate-limited) in single-digit ms — Wikimedia's API policy requires identification and was rejecting our unidentified shared-origin requests outright
+
+// Wikimedia's API policy requires a descriptive User-Agent identifying the application;
+// unidentified requests from a shared origin (like Vercel's pooled serverless IPs) get
+// aggressively rate-limited (confirmed: every wikidata/wikipedia/commons call was returning
+// 429 in single-digit ms — an instant rejection, not real processing).
+const WIKIMEDIA_HEADERS = { 'User-Agent': 'ArtThread/1.0 (https://artthread.io; hello@artthread.io) node-fetch' };
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -79,7 +85,7 @@ return categories.some(cat => /\b(paintings?|artworks?|drawings?|prints?|sculptu
 async function tryWikipediaSearch(queryText, artistLast, titleForCompare) {
 try {
 const q = encodeURIComponent(queryText);
-const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=3&prop=pageimages|extracts|categories&piprop=thumbnail&pithumbsize=400&exintro=1&explaintext=1&exchars=500&cllimit=50&clshow=!hidden&format=json&origin=*');
+const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=3&prop=pageimages|extracts|categories&piprop=thumbnail&pithumbsize=400&exintro=1&explaintext=1&exchars=500&cllimit=50&clshow=!hidden&format=json&origin=*', { headers: WIKIMEDIA_HEADERS });
 const data = await res.json();
 const pages = data && data.query && data.query.pages;
 if (!pages) return null;
@@ -117,7 +123,7 @@ return null;
 async function tryCommonsSearch(queryText, artistLast, titleForCompare) {
 try {
 const q = encodeURIComponent(queryText);
-const res = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo|categories&iiprop=extmetadata|url&iiurlwidth=500&cllimit=50&clshow=!hidden&format=json&origin=*');
+const res = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo|categories&iiprop=extmetadata|url&iiurlwidth=500&cllimit=50&clshow=!hidden&format=json&origin=*', { headers: WIKIMEDIA_HEADERS });
 const data = await res.json();
 const pages = data && data.query && data.query.pages;
 if (!pages) return null;
@@ -354,7 +360,7 @@ const languages = ['en', 'fr', 'de', 'nl', 'it', 'es'];
 let candidates = [];
 for (const lang of languages) {
 const searchQ = encodeURIComponent(title);
-const searchRes = await fetch('https://www.wikidata.org/w/api.php?action=wbsearchentities&search=' + searchQ + '&language=' + lang + '&type=item&limit=5&format=json&origin=*');
+const searchRes = await fetch('https://www.wikidata.org/w/api.php?action=wbsearchentities&search=' + searchQ + '&language=' + lang + '&type=item&limit=5&format=json&origin=*', { headers: WIKIMEDIA_HEADERS });
 const searchData = await searchRes.json();
 candidates = (searchData && searchData.search) || [];
 if (candidates.length) break;
@@ -368,7 +374,7 @@ const candidateLabels = {};
 for (const c of candidates) candidateLabels[c.id] = c.label || (c.match && c.match.text) || '';
 
 const ids = candidates.map(c => c.id).join('|');
-const entRes = await fetch('https://www.wikidata.org/w/api.php?action=wbgetentities&ids=' + ids + '&props=claims&languages=en&format=json&origin=*');
+const entRes = await fetch('https://www.wikidata.org/w/api.php?action=wbgetentities&ids=' + ids + '&props=claims&languages=en&format=json&origin=*', { headers: WIKIMEDIA_HEADERS });
 const entData = await entRes.json();
 const entities = (entData && entData.entities) || {};
 
@@ -385,7 +391,7 @@ const claims = ent.claims || {};
 }
 let refLabels = {};
 if (refIds.size) {
-const refRes = await fetch('https://www.wikidata.org/w/api.php?action=wbgetentities&ids=' + Array.from(refIds).join('|') + '&props=labels&languages=en&format=json&origin=*');
+const refRes = await fetch('https://www.wikidata.org/w/api.php?action=wbgetentities&ids=' + Array.from(refIds).join('|') + '&props=labels&languages=en&format=json&origin=*', { headers: WIKIMEDIA_HEADERS });
 const refData = await refRes.json();
 const refEntities = (refData && refData.entities) || {};
 for (const qid in refEntities) {

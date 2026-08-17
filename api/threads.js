@@ -1,4 +1,4 @@
-// v27 - Title-overlap check across all three fallback layers (Wikipedia, Commons, Wikidata): reject a match whose own title shares no real vocabulary with the queried title, catching hallucinated titles that would otherwise slip through on an artist-name-only match
+// v28 - Require Wikipedia fallback matches to be categorized as an actual artwork, not just pass title/artist checks — catches homonym pages (e.g. a town's article matching a painting of the same name)
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -71,10 +71,15 @@ if (inside && inside !== title && inside.length > 3) variants.push(inside);
 return variants.slice(0, 3);
 }
 
+function isArtworkPage(categories) {
+if (!categories) return false;
+return categories.some(cat => /\b(paintings?|artworks?|drawings?|prints?|sculptures?|lithographs?|watercolou?rs?|engravings?|etchings?|tapestries)\b/i.test(cat.title || ''));
+}
+
 async function tryWikipediaSearch(queryText, artistLast, titleForCompare) {
 try {
 const q = encodeURIComponent(queryText);
-const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=3&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=400&exintro=1&explaintext=1&exchars=500&format=json&origin=*');
+const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=3&prop=pageimages|extracts|categories&piprop=thumbnail&pithumbsize=400&exintro=1&explaintext=1&exchars=500&cllimit=50&clshow=!hidden&format=json&origin=*');
 const data = await res.json();
 const pages = data && data.query && data.query.pages;
 if (!pages) return null;
@@ -84,6 +89,11 @@ const extract = (page.extract || '').toLowerCase();
 const pageTitle = (page.title || '').toLowerCase();
 if (!artistLast || extract.includes(artistLast) || pageTitle.includes(artistLast)) {
 if (titleForCompare && !titleOverlaps(titleForCompare, page.title)) continue;
+// A page can pass both the artist-mention and title-overlap checks by coincidence when
+// the title is also a real place, person, or event name (e.g. Winslow Homer's painting
+// "Long Branch, New Jersey" vs. the actual town's Wikipedia article, which may mention
+// Homer in passing). Require the page to actually be categorized as an artwork.
+if (!isArtworkPage(page.categories)) continue;
 return page.thumbnail.source;
 }
 }

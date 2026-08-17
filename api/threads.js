@@ -1,4 +1,4 @@
-// v26 - Accept lat/lng from client, inject as geographic disambiguation hint for known-multiples artworks (same title/artist/medium, different museums, e.g. Panini's Modern Rome at Louvre/Met/MFA)
+// v27 - Title-overlap check across all three fallback layers (Wikipedia, Commons, Wikidata): reject a match whose own title shares no real vocabulary with the queried title, catching hallucinated titles that would otherwise slip through on an artist-name-only match
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -20,6 +20,26 @@ const shorter = a.length <= b.length ? a : b;
 const longer = a.length <= b.length ? b : a;
 if (longer.includes(shorter) && shorter.length / longer.length >= 0.7) return true;
 return false;
+}
+
+function titleTokens(s) {
+return normalizeTitle(s).split(' ').filter(w => w.length >= 3);
+}
+
+function titleOverlaps(query, candidate) {
+const qTokens = new Set(titleTokens(query));
+const cTokens = new Set(titleTokens(candidate));
+if (!qTokens.size || !cTokens.size) return false;
+let shared = 0;
+for (const t of qTokens) if (cTokens.has(t)) shared++;
+// Require meaningful shared vocabulary, not just one common short/generic word — this is what
+// catches a hallucinated title matching an unrelated search result (no real title exists to
+// compare against, so a genuine title has essentially nothing in common with it).
+return shared / Math.min(qTokens.size, cTokens.size) >= 0.4;
+}
+
+function cleanCommonsTitle(t) {
+return (t || '').replace(/^File:/i, '').replace(/\.(jpe?g|png|tiff?|gif)$/i, '');
 }
 
 async function logEvent(event) {
@@ -51,7 +71,7 @@ if (inside && inside !== title && inside.length > 3) variants.push(inside);
 return variants.slice(0, 3);
 }
 
-async function tryWikipediaSearch(queryText, artistLast) {
+async function tryWikipediaSearch(queryText, artistLast, titleForCompare) {
 try {
 const q = encodeURIComponent(queryText);
 const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=3&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=400&exintro=1&explaintext=1&exchars=500&format=json&origin=*');
@@ -63,6 +83,7 @@ if (!page || !page.thumbnail) continue;
 const extract = (page.extract || '').toLowerCase();
 const pageTitle = (page.title || '').toLowerCase();
 if (!artistLast || extract.includes(artistLast) || pageTitle.includes(artistLast)) {
+if (titleForCompare && !titleOverlaps(titleForCompare, page.title)) continue;
 return page.thumbnail.source;
 }
 }
@@ -83,7 +104,7 @@ return m[1].trim();
 return null;
 }
 
-async function tryCommonsSearch(queryText, artistLast) {
+async function tryCommonsSearch(queryText, artistLast, titleForCompare) {
 try {
 const q = encodeURIComponent(queryText);
 const res = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo|categories&iiprop=extmetadata|url&iiurlwidth=500&cllimit=50&clshow=!hidden&format=json&origin=*');
@@ -98,6 +119,7 @@ const artistField = ((meta.Artist && meta.Artist.value) || '').toLowerCase();
 const descField = ((meta.ImageDescription && meta.ImageDescription.value) || '').toLowerCase();
 const pageTitle = (page.title || '').toLowerCase();
 if (!artistLast || artistField.includes(artistLast) || descField.includes(artistLast) || pageTitle.includes(artistLast)) {
+if (titleForCompare && !titleOverlaps(titleForCompare, cleanCommonsTitle(page.title) + ' ' + descField)) continue;
 return {
 primaryImage: info.thumburl || info.url,
 museum: extractMuseumFromCategories(page.categories)
@@ -112,9 +134,9 @@ async function fetchWikimediaImage(title, artist) {
 const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
 for (const t of titleVariants(title)) {
 const queryText = t + ' ' + (artist || '');
-const wikiHit = await tryWikipediaSearch(queryText, artistLast);
+const wikiHit = await tryWikipediaSearch(queryText, artistLast, t);
 if (wikiHit) return { primaryImage: wikiHit, museum: null };
-const commonsHit = await tryCommonsSearch(queryText, artistLast);
+const commonsHit = await tryCommonsSearch(queryText, artistLast, t);
 if (commonsHit) return commonsHit;
 }
 return null;
@@ -329,6 +351,12 @@ if (candidates.length) break;
 }
 if (!candidates.length) return null;
 
+// wbsearchentities candidates already carry a .label — use it to reject entities whose own
+// title doesn't actually resemble what was queried, without any extra API call. This is what
+// catches a hallucinated title landing on an unrelated same-artist entity.
+const candidateLabels = {};
+for (const c of candidates) candidateLabels[c.id] = c.label || (c.match && c.match.text) || '';
+
 const ids = candidates.map(c => c.id).join('|');
 const entRes = await fetch('https://www.wikidata.org/w/api.php?action=wbgetentities&ids=' + ids + '&props=claims&languages=en&format=json&origin=*');
 const entData = await entRes.json();
@@ -363,6 +391,9 @@ const creatorId = creatorClaim && creatorClaim.value && creatorClaim.value.id;
 const creatorLabel = creatorId ? (refLabels[creatorId] || '') : '';
 // Reject candidates that are a different, named artist's work of the same title.
 if (artistLast && creatorLabel && !creatorLabel.toLowerCase().includes(artistLast)) continue;
+
+// Reject candidates whose own Wikidata label doesn't actually resemble the queried title.
+if (!titleOverlaps(title, candidateLabels[ent.id])) continue;
 
 // Reject candidates whose medium category conflicts with the one read off the wall label.
 // Only rejects on an actual conflict (both sides classified but different) — sparse Wikidata

@@ -1,4 +1,4 @@
-// v30 - Fix root cause of missing thumbnails tonight: add required User-Agent header to all Wikidata/Wikipedia/Commons calls. Confirmed via Vercel logs that every such call was returning 429 (rate-limited) in single-digit ms — Wikimedia's API policy requires identification and was rejecting our unidentified shared-origin requests outright
+// v31 - Extend medium disambiguation to the Wikipedia/Commons fallback layer (previously only checked at the Wikidata layer) — fixes a period engraving/print of a painting being returned as the thumbnail when the wall label said 'Oil on canvas'
 
 // Wikimedia's API policy requires a descriptive User-Agent identifying the application;
 // unidentified requests from a shared origin (like Vercel's pooled serverless IPs) get
@@ -82,7 +82,7 @@ if (!categories) return false;
 return categories.some(cat => /\b(paintings?|artworks?|drawings?|prints?|sculptures?|lithographs?|watercolou?rs?|engravings?|etchings?|tapestries)\b/i.test(cat.title || ''));
 }
 
-async function tryWikipediaSearch(queryText, artistLast, titleForCompare) {
+async function tryWikipediaSearch(queryText, artistLast, titleForCompare, expectedCategory) {
 try {
 const q = encodeURIComponent(queryText);
 const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=3&prop=pageimages|extracts|categories&piprop=thumbnail&pithumbsize=400&exintro=1&explaintext=1&exchars=500&cllimit=50&clshow=!hidden&format=json&origin=*', { headers: WIKIMEDIA_HEADERS });
@@ -100,6 +100,13 @@ if (titleForCompare && !titleOverlaps(titleForCompare, page.title)) continue;
 // "Long Branch, New Jersey" vs. the actual town's Wikipedia article, which may mention
 // Homer in passing). Require the page to actually be categorized as an artwork.
 if (!isArtworkPage(page.categories)) continue;
+// Reject a category-conflicting medium (e.g. a period engraving/print of a painting —
+// same title, same artist, real artwork page, but not the object the wall label described).
+if (expectedCategory) {
+const catText = (page.categories || []).map(c => c.title || '').join(' ');
+const pageCategory = mediumCategory(catText);
+if (pageCategory && pageCategory !== expectedCategory) continue;
+}
 return page.thumbnail.source;
 }
 }
@@ -120,7 +127,7 @@ return m[1].trim();
 return null;
 }
 
-async function tryCommonsSearch(queryText, artistLast, titleForCompare) {
+async function tryCommonsSearch(queryText, artistLast, titleForCompare, expectedCategory) {
 try {
 const q = encodeURIComponent(queryText);
 const res = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo|categories&iiprop=extmetadata|url&iiurlwidth=500&cllimit=50&clshow=!hidden&format=json&origin=*', { headers: WIKIMEDIA_HEADERS });
@@ -136,6 +143,13 @@ const descField = ((meta.ImageDescription && meta.ImageDescription.value) || '')
 const pageTitle = (page.title || '').toLowerCase();
 if (!artistLast || artistField.includes(artistLast) || descField.includes(artistLast) || pageTitle.includes(artistLast)) {
 if (titleForCompare && !titleOverlaps(titleForCompare, cleanCommonsTitle(page.title) + ' ' + descField)) continue;
+// Reject a category-conflicting medium (e.g. a period engraving/print of a painting —
+// same title, same artist, but not the object the wall label described).
+if (expectedCategory) {
+const catText = (page.categories || []).map(c => c.title || '').join(' ') + ' ' + descField;
+const pageCategory = mediumCategory(catText);
+if (pageCategory && pageCategory !== expectedCategory) continue;
+}
 return {
 primaryImage: info.thumburl || info.url,
 museum: extractMuseumFromCategories(page.categories)
@@ -146,13 +160,14 @@ return null;
 } catch(e) { console.log('[img] tryCommonsSearch error:', e.message); return null; }
 }
 
-async function fetchWikimediaImage(title, artist) {
+async function fetchWikimediaImage(title, artist, medium) {
 const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
+const expectedCategory = mediumCategory(medium);
 for (const t of titleVariants(title)) {
 const queryText = t + ' ' + (artist || '');
-const wikiHit = await tryWikipediaSearch(queryText, artistLast, t);
+const wikiHit = await tryWikipediaSearch(queryText, artistLast, t, expectedCategory);
 if (wikiHit) return { primaryImage: wikiHit, museum: null };
-const commonsHit = await tryCommonsSearch(queryText, artistLast, t);
+const commonsHit = await tryCommonsSearch(queryText, artistLast, t, expectedCategory);
 if (commonsHit) return commonsHit;
 }
 return null;
@@ -467,7 +482,7 @@ const wikidata = await fetchWikidataImage(title, artist, medium);
 console.log('[img]', JSON.stringify(title), 'wikidata took', Date.now() - t1, 'ms', wikidata ? 'HIT' : 'MISS');
 if (wikidata && wikidata.primaryImage) return wikidata;
 const t2 = Date.now();
-const wiki = await fetchWikimediaImage(title, artist);
+const wiki = await fetchWikimediaImage(title, artist, medium);
 console.log('[img]', JSON.stringify(title), 'wiki/commons took', Date.now() - t2, 'ms', wiki ? 'HIT' : 'MISS');
 if (wiki && wiki.primaryImage) return wiki;
 console.log('[img]', JSON.stringify(title), 'TOTAL MISS, elapsed', Date.now() - t0, 'ms');

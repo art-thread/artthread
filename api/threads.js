@@ -41,12 +41,27 @@ body: JSON.stringify(event)
 async function fetchWikimediaImage(title, artist) {
 try {
 const q = encodeURIComponent(title + ' ' + artist);
-const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=400&format=json&origin=*');
+// Pull a few candidates plus a short text extract for each, so we can verify the artist
+// actually appears on the page before trusting its thumbnail. A bare title search can land
+// on a same-titled work by a different artist (e.g. two paintings both called
+// "Orestes Pursued by the Furies" — Sargent's MFA mural vs. Bouguereau's 1862 canvas).
+const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=3&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=400&exintro=1&explaintext=1&exchars=500&format=json&origin=*');
 const data = await res.json();
 const pages = data && data.query && data.query.pages;
 if (!pages) return null;
-const page = Object.values(pages)[0];
-return page && page.thumbnail ? page.thumbnail.source : null;
+const candidates = Object.values(pages);
+const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
+for (const page of candidates) {
+if (!page || !page.thumbnail) continue;
+const extract = (page.extract || '').toLowerCase();
+const pageTitle = (page.title || '').toLowerCase();
+// Accept only if the artist's surname shows up in the page title or its intro text.
+// Without artist info at all, fall back to accepting the top result (best effort).
+if (!artistLast || extract.includes(artistLast) || pageTitle.includes(artistLast)) {
+return page.thumbnail.source;
+}
+}
+return null;
 } catch(e) { return null; }
 }
 

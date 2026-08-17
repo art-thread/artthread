@@ -1,4 +1,4 @@
-// v24 - Wikidata structured-entity lookup (multi-language search, creator/collection as linked data, image via P18) tried before Wikipedia/Commons title-string fallback; fixes title-variant fragility and cross-language title matching
+// v25 - Capture medium from wall label in ID schema; use it to disambiguate multiple Wikidata candidates sharing title/artist but differing in medium (e.g. Manet's oil vs. lithograph 'Execution of Emperor Maximilian')
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -291,9 +291,29 @@ return { primaryImage: imageUrl, museum: 'Tate, London' };
 } catch(e) { return null; }
 }
 
-async function fetchWikidataImage(title, artist) {
+const MEDIUM_CATEGORIES = {
+painting: ['oil', 'painting', 'tempera', 'fresco', 'panel', 'canvas', 'acrylic', 'gouache'],
+print: ['lithograph', 'engraving', 'etching', 'woodcut', 'linocut', 'print', 'intaglio', 'screenprint', 'aquatint'],
+drawing: ['drawing', 'watercolor', 'watercolour', 'pastel', 'charcoal', 'pencil', 'chalk'],
+sculpture: ['sculpture', 'bronze', 'marble', 'terracotta', 'carving', 'statue'],
+photograph: ['photograph', 'photography', 'daguerreotype'],
+textile: ['tapestry', 'textile', 'embroidery'],
+ceramic: ['ceramic', 'porcelain', 'pottery']
+};
+
+function mediumCategory(text) {
+if (!text) return null;
+const lower = text.toLowerCase();
+for (const cat in MEDIUM_CATEGORIES) {
+if (MEDIUM_CATEGORIES[cat].some(kw => lower.includes(kw))) return cat;
+}
+return null;
+}
+
+async function fetchWikidataImage(title, artist, medium) {
 try {
 const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
+const expectedCategory = mediumCategory(medium);
 
 // Wikidata labels/aliases exist per-language, so a title search only in English can miss a
 // work whose canonical Wikidata label is French, German, Dutch, etc. Try a few major languages
@@ -314,15 +334,16 @@ const entRes = await fetch('https://www.wikidata.org/w/api.php?action=wbgetentit
 const entData = await entRes.json();
 const entities = (entData && entData.entities) || {};
 
-// Batch-resolve the creator (P170) and collection (P195) QIDs referenced across all candidates
-// into English labels, so we can verify the artist and read the museum name in one extra call.
+// Batch-resolve every referenced creator (P170), collection (P195), instance-of (P31), and
+// material-used (P186) QID into an English label in one extra call — needed to verify the
+// artist, read the museum name, and (critically) tell apart two works that share a title and
+// artist but are different objects in different media (e.g. Manet's oil vs. lithograph of the
+// same "Execution of Emperor Maximilian" subject).
 const refIds = new Set();
+const claimIds = (claim) => (claim || []).map(c => c.mainsnak && c.mainsnak.datavalue && c.mainsnak.datavalue.value && c.mainsnak.datavalue.value.id).filter(Boolean);
 for (const ent of Object.values(entities)) {
 const claims = ent.claims || {};
-const creator = claims.P170 && claims.P170[0] && claims.P170[0].mainsnak && claims.P170[0].mainsnak.datavalue;
-const collection = claims.P195 && claims.P195[0] && claims.P195[0].mainsnak && claims.P195[0].mainsnak.datavalue;
-if (creator && creator.value && creator.value.id) refIds.add(creator.value.id);
-if (collection && collection.value && collection.value.id) refIds.add(collection.value.id);
+[...claimIds(claims.P170), ...claimIds(claims.P195), ...claimIds(claims.P31), ...claimIds(claims.P186)].forEach(id => refIds.add(id));
 }
 let refLabels = {};
 if (refIds.size) {
@@ -343,6 +364,16 @@ const creatorLabel = creatorId ? (refLabels[creatorId] || '') : '';
 // Reject candidates that are a different, named artist's work of the same title.
 if (artistLast && creatorLabel && !creatorLabel.toLowerCase().includes(artistLast)) continue;
 
+// Reject candidates whose medium category conflicts with the one read off the wall label.
+// Only rejects on an actual conflict (both sides classified but different) — sparse Wikidata
+// metadata never causes a false rejection, it just means no extra disambiguation happened.
+if (expectedCategory) {
+const claimIdsFor = (key) => claimIds(claims[key]).map(id => refLabels[id]).filter(Boolean).join(' ');
+const candidateMediumText = claimIdsFor('P31') + ' ' + claimIdsFor('P186');
+const candidateCategory = mediumCategory(candidateMediumText);
+if (candidateCategory && candidateCategory !== expectedCategory) continue;
+}
+
 const imageClaim = claims.P18 && claims.P18[0] && claims.P18[0].mainsnak && claims.P18[0].mainsnak.datavalue;
 const filename = imageClaim && imageClaim.value;
 if (!filename) continue;
@@ -358,7 +389,7 @@ return null;
 } catch(e) { return null; }
 }
 
-async function fetchArtworkImage(title, artist) {
+async function fetchArtworkImage(title, artist, medium) {
 if (!title || title === 'Unknown work') return null;
 const results = await Promise.allSettled([
 fetchAICData(title, artist),
@@ -379,7 +410,7 @@ if (r.status === 'fulfilled' && r.value && r.value.primaryImage) return r.value;
 // Wikidata is structured-entity matching (creator/collection are linked data, not text guesses,
 // and the image comes straight from P18) so it's tried before the fuzzier Wikipedia/Commons
 // title-string search below.
-const wikidata = await fetchWikidataImage(title, artist);
+const wikidata = await fetchWikidataImage(title, artist, medium);
 if (wikidata && wikidata.primaryImage) return wikidata;
 const wiki = await fetchWikimediaImage(title, artist);
 if (wiki && wiki.primaryImage) return wiki;
@@ -465,7 +496,7 @@ headers: {
 body: JSON.stringify({
 model: 'claude-sonnet-4-6',
 max_tokens: 4096,
-system: 'You are ArtThread. Only use REAL verifiable artworks. Ignore reflections and people in photos. If you cannot confidently identify a work set title to Unknown work and artist to Unknown artist. Respond with ONLY valid JSON nothing else:\n{"anchor":{"title":"title","artist":"artist","date":"date","museum":"museum","metId":null},"connections":[{"title":"title","artist":"artist","date":"date","museum":"museum","thread":"light","throughline":"one sentence"},{"title":"title","artist":"artist","date":"date","museum":"museum","thread":"power","throughline":"one sentence"},{"title":"title","artist":"artist","date":"date","museum":"museum","thread":"time","throughline":"one sentence"}]}\n\n' + ALBERTINA,
+system: 'You are ArtThread. Only use REAL verifiable artworks. Ignore reflections and people in photos. If a wall label or caption is visible in the photo, read the medium directly off it (e.g. "Oil on canvas", "Lithograph", "Marble") — this matters because some artists made multiple works with the same title in different media (e.g. Manet\'s several versions of "The Execution of Emperor Maximilian" — an oil painting and a lithograph are different objects). If you cannot confidently identify a work set title to Unknown work and artist to Unknown artist. Respond with ONLY valid JSON nothing else:\n{"anchor":{"title":"title","artist":"artist","date":"date","museum":"museum","medium":"medium or empty string if unknown","metId":null},"connections":[{"title":"title","artist":"artist","date":"date","museum":"museum","medium":"medium or empty string if unknown","thread":"light","throughline":"one sentence"},{"title":"title","artist":"artist","date":"date","museum":"museum","medium":"medium or empty string if unknown","thread":"power","throughline":"one sentence"},{"title":"title","artist":"artist","date":"date","museum":"museum","medium":"medium or empty string if unknown","thread":"time","throughline":"one sentence"}]}\n\n' + ALBERTINA,
 messages: [{ role: 'user', content: userContent }]
 })
 });
@@ -496,7 +527,7 @@ result.anchor.primaryImage = result.anchor.primaryImage || anchorMet.primaryImag
 }
 }
 if (!result.anchor.primaryImage) {
-const anchorImg = await fetchArtworkImage(result.anchor.title, result.anchor.artist);
+const anchorImg = await fetchArtworkImage(result.anchor.title, result.anchor.artist, result.anchor.medium);
 if (anchorImg && anchorImg.primaryImage) result.anchor.primaryImage = anchorImg.primaryImage;
 // A museum API match is authoritative on location — correct the LLM's free-text guess.
 // (Wiki/Commons fallback returns museum: null, so this never overwrites with another guess.)
@@ -509,7 +540,7 @@ const connCatalogueMatch = await fetchCatalogueMatch(conn.title, conn.artist);
 if (connCatalogueMatch && connCatalogueMatch.primary_image) {
 conn.primaryImage = connCatalogueMatch.primary_image;
 }
-const img = await fetchArtworkImage(conn.title, conn.artist);
+const img = await fetchArtworkImage(conn.title, conn.artist, conn.medium);
 if (img && img.primaryImage) {
 conn.primaryImage = conn.primaryImage || img.primaryImage;
 if (img.metId) conn.metId = img.metId;

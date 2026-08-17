@@ -1,4 +1,4 @@
-// v21 - Wikimedia Commons fallback + artist verification on wiki image matches; propagate verified museum from API matches to correct LLM location guesses
+// v22 - Retry wiki/Commons image search across title variants (full, stripped-of-parens, parenthetical) to handle LLM-paraphrased titles that don't rank well against the real title
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -38,19 +38,26 @@ body: JSON.stringify(event)
 } catch (e) { /* logging must never break the product */ }
 }
 
-async function fetchWikimediaImage(title, artist) {
-try {
-const q = encodeURIComponent(title + ' ' + artist);
-const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
+function titleVariants(title) {
+if (!title) return [title];
+const variants = [title];
+const parenMatch = title.match(/\(([^)]+)\)/);
+const stripped = title.replace(/\([^)]*\)/g, '').trim();
+if (stripped && stripped !== title && stripped.length > 3) variants.push(stripped);
+if (parenMatch) {
+const inside = parenMatch[1].trim();
+if (inside && inside !== title && inside.length > 3) variants.push(inside);
+}
+return variants.slice(0, 3);
+}
 
-// 1) English Wikipedia article search first — verify the artist actually appears on the
-// page before trusting its thumbnail. A bare title search can land on a same-titled work
-// by a different artist (e.g. two paintings both called "Orestes Pursued by the Furies" —
-// Sargent's MFA mural vs. Bouguereau's 1862 canvas).
+async function tryWikipediaSearch(queryText, artistLast) {
+try {
+const q = encodeURIComponent(queryText);
 const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=3&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=400&exintro=1&explaintext=1&exchars=500&format=json&origin=*');
 const data = await res.json();
 const pages = data && data.query && data.query.pages;
-if (pages) {
+if (!pages) return null;
 for (const page of Object.values(pages)) {
 if (!page || !page.thumbnail) continue;
 const extract = (page.extract || '').toLowerCase();
@@ -59,16 +66,18 @@ if (!artistLast || extract.includes(artistLast) || pageTitle.includes(artistLast
 return page.thumbnail.source;
 }
 }
+return null;
+} catch(e) { return null; }
 }
 
-// 2) Many artworks have a Wikimedia Commons file but no standalone Wikipedia article
-// (common for museum-specific or lesser-known works). Check Commons file metadata,
-// which carries a structured Artist field we can verify the same way.
-const commonsRes = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo&iiprop=extmetadata|url&iiurlwidth=500&format=json&origin=*');
-const commonsData = await commonsRes.json();
-const commonsPages = commonsData && commonsData.query && commonsData.query.pages;
-if (commonsPages) {
-for (const page of Object.values(commonsPages)) {
+async function tryCommonsSearch(queryText, artistLast) {
+try {
+const q = encodeURIComponent(queryText);
+const res = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo&iiprop=extmetadata|url&iiurlwidth=500&format=json&origin=*');
+const data = await res.json();
+const pages = data && data.query && data.query.pages;
+if (!pages) return null;
+for (const page of Object.values(pages)) {
 const info = page.imageinfo && page.imageinfo[0];
 if (!info) continue;
 const meta = info.extmetadata || {};
@@ -79,10 +88,20 @@ if (!artistLast || artistField.includes(artistLast) || descField.includes(artist
 return info.thumburl || info.url;
 }
 }
-}
-
 return null;
 } catch(e) { return null; }
+}
+
+async function fetchWikimediaImage(title, artist) {
+const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
+for (const t of titleVariants(title)) {
+const queryText = t + ' ' + (artist || '');
+const wikiHit = await tryWikipediaSearch(queryText, artistLast);
+if (wikiHit) return wikiHit;
+const commonsHit = await tryCommonsSearch(queryText, artistLast);
+if (commonsHit) return commonsHit;
+}
+return null;
 }
 
 async function fetchMetData(title, artist) {

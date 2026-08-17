@@ -1,4 +1,4 @@
-// v19 - Log edge_type (taste-movement signal) and connection_followed events from client jumps
+// v21 - Wikimedia Commons fallback + artist verification on wiki image matches; propagate verified museum from API matches to correct LLM location guesses
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -41,26 +41,46 @@ body: JSON.stringify(event)
 async function fetchWikimediaImage(title, artist) {
 try {
 const q = encodeURIComponent(title + ' ' + artist);
-// Pull a few candidates plus a short text extract for each, so we can verify the artist
-// actually appears on the page before trusting its thumbnail. A bare title search can land
-// on a same-titled work by a different artist (e.g. two paintings both called
-// "Orestes Pursued by the Furies" — Sargent's MFA mural vs. Bouguereau's 1862 canvas).
+const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
+
+// 1) English Wikipedia article search first — verify the artist actually appears on the
+// page before trusting its thumbnail. A bare title search can land on a same-titled work
+// by a different artist (e.g. two paintings both called "Orestes Pursued by the Furies" —
+// Sargent's MFA mural vs. Bouguereau's 1862 canvas).
 const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=' + q + '&gsrlimit=3&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=400&exintro=1&explaintext=1&exchars=500&format=json&origin=*');
 const data = await res.json();
 const pages = data && data.query && data.query.pages;
-if (!pages) return null;
-const candidates = Object.values(pages);
-const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
-for (const page of candidates) {
+if (pages) {
+for (const page of Object.values(pages)) {
 if (!page || !page.thumbnail) continue;
 const extract = (page.extract || '').toLowerCase();
 const pageTitle = (page.title || '').toLowerCase();
-// Accept only if the artist's surname shows up in the page title or its intro text.
-// Without artist info at all, fall back to accepting the top result (best effort).
 if (!artistLast || extract.includes(artistLast) || pageTitle.includes(artistLast)) {
 return page.thumbnail.source;
 }
 }
+}
+
+// 2) Many artworks have a Wikimedia Commons file but no standalone Wikipedia article
+// (common for museum-specific or lesser-known works). Check Commons file metadata,
+// which carries a structured Artist field we can verify the same way.
+const commonsRes = await fetch('https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=' + q + '&gsrlimit=3&prop=imageinfo&iiprop=extmetadata|url&iiurlwidth=500&format=json&origin=*');
+const commonsData = await commonsRes.json();
+const commonsPages = commonsData && commonsData.query && commonsData.query.pages;
+if (commonsPages) {
+for (const page of Object.values(commonsPages)) {
+const info = page.imageinfo && page.imageinfo[0];
+if (!info) continue;
+const meta = info.extmetadata || {};
+const artistField = ((meta.Artist && meta.Artist.value) || '').toLowerCase();
+const descField = ((meta.ImageDescription && meta.ImageDescription.value) || '').toLowerCase();
+const pageTitle = (page.title || '').toLowerCase();
+if (!artistLast || artistField.includes(artistLast) || descField.includes(artistLast) || pageTitle.includes(artistLast)) {
+return info.thumburl || info.url;
+}
+}
+}
+
 return null;
 } catch(e) { return null; }
 }
@@ -371,6 +391,9 @@ result.anchor.primaryImage = result.anchor.primaryImage || anchorMet.primaryImag
 if (!result.anchor.primaryImage) {
 const anchorImg = await fetchArtworkImage(result.anchor.title, result.anchor.artist);
 if (anchorImg && anchorImg.primaryImage) result.anchor.primaryImage = anchorImg.primaryImage;
+// A museum API match is authoritative on location — correct the LLM's free-text guess.
+// (Wiki/Commons fallback returns museum: null, so this never overwrites with another guess.)
+if (anchorImg && anchorImg.museum) result.anchor.museum = anchorImg.museum;
 }
 
 if (result.connections && result.connections.length) {

@@ -1,4 +1,4 @@
-// v23 - Extract museum from Wikimedia Commons category tags as an authoritative location signal (fixes museums with no direct API, e.g. MFA Boston); apply same museum-correction to connection works
+// v24 - Wikidata structured-entity lookup (multi-language search, creator/collection as linked data, image via P18) tried before Wikipedia/Commons title-string fallback; fixes title-variant fragility and cross-language title matching
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -291,6 +291,73 @@ return { primaryImage: imageUrl, museum: 'Tate, London' };
 } catch(e) { return null; }
 }
 
+async function fetchWikidataImage(title, artist) {
+try {
+const artistLast = artist ? artist.trim().split(/\s+/).pop().toLowerCase() : '';
+
+// Wikidata labels/aliases exist per-language, so a title search only in English can miss a
+// work whose canonical Wikidata label is French, German, Dutch, etc. Try a few major languages
+// in turn and stop at the first one that returns candidates.
+const languages = ['en', 'fr', 'de', 'nl', 'it', 'es'];
+let candidates = [];
+for (const lang of languages) {
+const searchQ = encodeURIComponent(title);
+const searchRes = await fetch('https://www.wikidata.org/w/api.php?action=wbsearchentities&search=' + searchQ + '&language=' + lang + '&type=item&limit=5&format=json&origin=*');
+const searchData = await searchRes.json();
+candidates = (searchData && searchData.search) || [];
+if (candidates.length) break;
+}
+if (!candidates.length) return null;
+
+const ids = candidates.map(c => c.id).join('|');
+const entRes = await fetch('https://www.wikidata.org/w/api.php?action=wbgetentities&ids=' + ids + '&props=claims&languages=en&format=json&origin=*');
+const entData = await entRes.json();
+const entities = (entData && entData.entities) || {};
+
+// Batch-resolve the creator (P170) and collection (P195) QIDs referenced across all candidates
+// into English labels, so we can verify the artist and read the museum name in one extra call.
+const refIds = new Set();
+for (const ent of Object.values(entities)) {
+const claims = ent.claims || {};
+const creator = claims.P170 && claims.P170[0] && claims.P170[0].mainsnak && claims.P170[0].mainsnak.datavalue;
+const collection = claims.P195 && claims.P195[0] && claims.P195[0].mainsnak && claims.P195[0].mainsnak.datavalue;
+if (creator && creator.value && creator.value.id) refIds.add(creator.value.id);
+if (collection && collection.value && collection.value.id) refIds.add(collection.value.id);
+}
+let refLabels = {};
+if (refIds.size) {
+const refRes = await fetch('https://www.wikidata.org/w/api.php?action=wbgetentities&ids=' + Array.from(refIds).join('|') + '&props=labels&languages=en&format=json&origin=*');
+const refData = await refRes.json();
+const refEntities = (refData && refData.entities) || {};
+for (const qid in refEntities) {
+const ent = refEntities[qid];
+refLabels[qid] = ent.labels && ent.labels.en && ent.labels.en.value;
+}
+}
+
+for (const ent of Object.values(entities)) {
+const claims = ent.claims || {};
+const creatorClaim = claims.P170 && claims.P170[0] && claims.P170[0].mainsnak && claims.P170[0].mainsnak.datavalue;
+const creatorId = creatorClaim && creatorClaim.value && creatorClaim.value.id;
+const creatorLabel = creatorId ? (refLabels[creatorId] || '') : '';
+// Reject candidates that are a different, named artist's work of the same title.
+if (artistLast && creatorLabel && !creatorLabel.toLowerCase().includes(artistLast)) continue;
+
+const imageClaim = claims.P18 && claims.P18[0] && claims.P18[0].mainsnak && claims.P18[0].mainsnak.datavalue;
+const filename = imageClaim && imageClaim.value;
+if (!filename) continue;
+
+const collectionClaim = claims.P195 && claims.P195[0] && claims.P195[0].mainsnak && claims.P195[0].mainsnak.datavalue;
+const collectionId = collectionClaim && collectionClaim.value && collectionClaim.value.id;
+const museum = collectionId ? (refLabels[collectionId] || null) : null;
+
+const imageUrl = 'https://commons.wikimedia.org/wiki/Special:FilePath/' + encodeURIComponent(filename.replace(/ /g, '_')) + '?width=500';
+return { primaryImage: imageUrl, museum: museum, qid: ent.id };
+}
+return null;
+} catch(e) { return null; }
+}
+
 async function fetchArtworkImage(title, artist) {
 if (!title || title === 'Unknown work') return null;
 const results = await Promise.allSettled([
@@ -309,6 +376,11 @@ fetchMetData(title, artist)
 for (const r of results) {
 if (r.status === 'fulfilled' && r.value && r.value.primaryImage) return r.value;
 }
+// Wikidata is structured-entity matching (creator/collection are linked data, not text guesses,
+// and the image comes straight from P18) so it's tried before the fuzzier Wikipedia/Commons
+// title-string search below.
+const wikidata = await fetchWikidataImage(title, artist);
+if (wikidata && wikidata.primaryImage) return wikidata;
 const wiki = await fetchWikimediaImage(title, artist);
 if (wiki && wiki.primaryImage) return wiki;
 return null;

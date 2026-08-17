@@ -1,4 +1,4 @@
-// v28 - Require Wikipedia fallback matches to be categorized as an actual artwork, not just pass title/artist checks — catches homonym pages (e.g. a town's article matching a painting of the same name)
+// v29 - Add diagnostic timing/stage logging to the image-fetch pipeline (museum APIs / Wikidata / Wikipedia-Commons, per-stage duration and hit/miss, actual error messages instead of silent catches) to diagnose the multi-connection thumbnail-miss issue via Vercel logs
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -98,7 +98,7 @@ return page.thumbnail.source;
 }
 }
 return null;
-} catch(e) { return null; }
+} catch(e) { console.log('[img] tryWikipediaSearch error:', e.message); return null; }
 }
 
 function extractMuseumFromCategories(categories) {
@@ -137,7 +137,7 @@ museum: extractMuseumFromCategories(page.categories)
 }
 }
 return null;
-} catch(e) { return null; }
+} catch(e) { console.log('[img] tryCommonsSearch error:', e.message); return null; }
 }
 
 async function fetchWikimediaImage(title, artist) {
@@ -427,11 +427,12 @@ const imageUrl = 'https://commons.wikimedia.org/wiki/Special:FilePath/' + encode
 return { primaryImage: imageUrl, museum: museum, qid: ent.id };
 }
 return null;
-} catch(e) { return null; }
+} catch(e) { console.log('[img] fetchWikidataImage error:', e.message); return null; }
 }
 
 async function fetchArtworkImage(title, artist, medium) {
 if (!title || title === 'Unknown work') return null;
+const t0 = Date.now();
 const results = await Promise.allSettled([
 fetchAICData(title, artist),
 fetchRijksData(title, artist),
@@ -445,16 +446,25 @@ fetchGettyData(title, artist),
 fetchTateData(title, artist),
 fetchMetData(title, artist)
 ]);
+console.log('[img]', JSON.stringify(title), 'museum-APIs took', Date.now() - t0, 'ms');
 for (const r of results) {
-if (r.status === 'fulfilled' && r.value && r.value.primaryImage) return r.value;
+if (r.status === 'fulfilled' && r.value && r.value.primaryImage) {
+console.log('[img]', JSON.stringify(title), 'HIT via museum API');
+return r.value;
+}
 }
 // Wikidata is structured-entity matching (creator/collection are linked data, not text guesses,
 // and the image comes straight from P18) so it's tried before the fuzzier Wikipedia/Commons
 // title-string search below.
+const t1 = Date.now();
 const wikidata = await fetchWikidataImage(title, artist, medium);
+console.log('[img]', JSON.stringify(title), 'wikidata took', Date.now() - t1, 'ms', wikidata ? 'HIT' : 'MISS');
 if (wikidata && wikidata.primaryImage) return wikidata;
+const t2 = Date.now();
 const wiki = await fetchWikimediaImage(title, artist);
+console.log('[img]', JSON.stringify(title), 'wiki/commons took', Date.now() - t2, 'ms', wiki ? 'HIT' : 'MISS');
 if (wiki && wiki.primaryImage) return wiki;
+console.log('[img]', JSON.stringify(title), 'TOTAL MISS, elapsed', Date.now() - t0, 'ms');
 return null;
 }
 

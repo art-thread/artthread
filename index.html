@@ -117,6 +117,14 @@ const anonId = (function(){
   return id;
 })();
 let threadDepth = 0, pendingJump = null;
+let userLat = null, userLng = null;
+if (navigator.geolocation) {
+navigator.geolocation.getCurrentPosition(
+(pos) => { userLat = pos.coords.latitude; userLng = pos.coords.longitude; },
+() => { /* permission denied or unavailable — silently proceed without location */ },
+{ timeout: 5000, maximumAge: 600000 }
+);
+}
 async function handleUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -177,7 +185,7 @@ async function findThreads() {
     const res = await fetch('/api/threads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, imageBase64, imageType, anonId, depth, edgeType })
+      body: JSON.stringify({ query, imageBase64, imageType, anonId, depth, edgeType, lat: userLat, lng: userLng })
     });
     const result = await res.json();
     if (result.error) throw new Error(result.error);

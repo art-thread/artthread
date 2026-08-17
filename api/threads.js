@@ -1,4 +1,4 @@
-// v25 - Capture medium from wall label in ID schema; use it to disambiguate multiple Wikidata candidates sharing title/artist but differing in medium (e.g. Manet's oil vs. lithograph 'Execution of Emperor Maximilian')
+// v26 - Accept lat/lng from client, inject as geographic disambiguation hint for known-multiples artworks (same title/artist/medium, different museums, e.g. Panini's Modern Rome at Louvre/Met/MFA)
 
 function normalizeTitle(s) {
 if (!s) return '';
@@ -476,13 +476,16 @@ res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 if (req.method === 'OPTIONS') return res.status(200).end();
 if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-const { query, imageBase64, imageType, anonId, depth, edgeType } = req.body;
+const { query, imageBase64, imageType, anonId, depth, edgeType, lat, lng } = req.body;
 const userContent = [];
 if (imageBase64) {
 userContent.push({ type: 'image', source: { type: 'base64', media_type: imageType || 'image/jpeg', data: imageBase64 }});
 }
+const geoHint = (typeof lat === 'number' && typeof lng === 'number')
+? ' The visitor\'s approximate location is latitude ' + lat.toFixed(3) + ', longitude ' + lng.toFixed(3) + '. Some artists painted multiple original versions of the same title at different museums (e.g. Panini\'s "Modern Rome" exists at the Louvre, the Met, and the MFA Boston) — when that\'s the case, use this location to identify which museum\'s version this actually is, rather than defaulting to the most famous one.'
+: '';
 userContent.push({ type: 'text', text: imageBase64
-? 'Identify this artwork then find 3 connected works. Ignore glass reflections and people in foreground. If you cannot confidently identify the work set title to Unknown work. ' + (query || '')
+? 'Identify this artwork then find 3 connected works. Ignore glass reflections and people in foreground. If you cannot confidently identify the work set title to Unknown work. ' + geoHint + ' ' + (query || '')
 : 'Find connections for: "' + query + '"' });
 
 try {
